@@ -1,0 +1,5 @@
+{
+  "name": "Black Swan ERP",
+  "description": "A comprehensive ERP system for a medical uniform factory, featuring contract management, production tracking, accounting with break-even analysis, inventory, and role-based access control. Supports Arabic (RTL) and English.",
+  "requestFramePermissions": []
+}

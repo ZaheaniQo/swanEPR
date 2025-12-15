@@ -1,0 +1,69 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* DEFAULT LIGHT THEME (RGB Values) */
+    --color-primary: 13 148 136; /* Teal 600 */
+    --color-primary-hover: 15 118 110; /* Teal 700 */
+    --color-primary-foreground: 255 255 255;
+
+    --color-secondary: 241 245 249; /* Slate 100 */
+    --color-secondary-hover: 226 232 240; /* Slate 200 */
+    --color-secondary-foreground: 30 41 59; /* Slate 800 */
+
+    --color-accent: 212 163 115; /* Rose Gold/Bronze */
+    --color-accent-foreground: 255 255 255;
+
+    --color-background: 248 250 252; /* Slate 50 */
+    --color-surface: 255 255 255; /* White */
+    
+    --color-text: 15 23 42; /* Slate 900 */
+    --color-text-muted: 100 116 139; /* Slate 500 */
+    
+    --color-border: 226 232 240; /* Slate 200 */
+    --color-input: 226 232 240; /* Slate 200 */
+    
+    --color-danger: 239 68 68; /* Red 500 */
+    --color-danger-foreground: 255 255 255;
+    
+    --color-success: 16 185 129; /* Emerald 500 */
+    --color-success-foreground: 255 255 255;
+  }
+
+  .dark {
+    /* DEFAULT DARK THEME (RGB Values) */
+    --color-primary: 20 184 166; /* Teal 500 */
+    --color-primary-hover: 45 212 191; /* Teal 400 */
+    --color-primary-foreground: 255 255 255;
+
+    --color-secondary: 30 41 59; /* Slate 800 */
+    --color-secondary-hover: 51 65 85; /* Slate 700 */
+    --color-secondary-foreground: 226 232 240; /* Slate 200 */
+
+    --color-accent: 212 163 115;
+    --color-accent-foreground: 255 255 255;
+
+    --color-background: 15 23 42; /* Slate 900 */
+    --color-surface: 30 41 59; /* Slate 800 */
+    
+    --color-text: 241 245 249; /* Slate 100 */
+    --color-text-muted: 148 163 184; /* Slate 400 */
+    
+    --color-border: 51 65 85; /* Slate 700 */
+    --color-input: 51 65 85; /* Slate 700 */
+  }
+}
+
+body {
+  @apply bg-background text-text transition-colors duration-300;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { @apply bg-secondary; }
+::-webkit-scrollbar-thumb { @apply bg-slate-400 rounded-full hover:bg-slate-500; }
+
+.font-cairo { font-family: 'Cairo', sans-serif; }
+.font-inter { font-family: 'Inter', sans-serif; }
