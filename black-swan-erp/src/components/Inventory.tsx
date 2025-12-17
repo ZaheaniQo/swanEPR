@@ -12,7 +12,7 @@ import { Badge } from './ui/Badge';
 import { ArrowLeftRight, Layers, Shirt, Search } from 'lucide-react';
 
 const Inventory: React.FC = () => {
-  const { t } = useTranslation();
+    const { t, lang } = useTranslation();
   const navigate = useNavigate();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [filterType, setFilterType] = useState<'All' | 'Material' | 'Product'>('All');
@@ -53,14 +53,14 @@ const Inventory: React.FC = () => {
       />
 
       <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-xl border border-border shadow-sm">
-          <div className="relative flex-1">
-              <Search className="absolute left-3 top-2.5 text-text-muted" size={18} />
-              <input 
-                className="w-full pl-10 pr-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary bg-background" 
-                placeholder={t('search.inventory')} 
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-              />
+                    <div className="relative flex-1">
+                            <Search className={`absolute ${lang === 'ar' ? 'right-3' : 'left-3'} top-2.5 text-text-muted`} size={18} />
+                            <input 
+                                className={`w-full ${lang === 'ar' ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-2 border border-input rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary bg-background`} 
+                                placeholder={t('search.inventory')} 
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                            />
           </div>
           <div className="flex gap-2">
               {['All', 'Material', 'Product'].map(type => (

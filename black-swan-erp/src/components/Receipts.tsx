@@ -17,10 +17,15 @@ const Receipts: React.FC = () => {
     loadData();
   }, []);
 
-  const loadData = async () => {
-    const r = await dataService.getReceipts();
-    setReceipts(r);
-  };
+    const loadData = async () => {
+        try {
+            const r = await dataService.getReceipts();
+            setReceipts(r);
+        } catch (err: any) {
+            console.error(err);
+            setReceipts([]);
+        }
+    };
 
   return (
     <div className="space-y-6">

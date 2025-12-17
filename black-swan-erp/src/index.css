@@ -61,6 +61,20 @@ body {
   @apply bg-background text-text transition-colors duration-300;
 }
 
+/* Global rhythm and cards */
+.page-shell { @apply max-w-7xl mx-auto px-4 md:px-8 lg:px-12; }
+.section-gap { @apply space-y-6 md:space-y-8; }
+.card-grid { @apply grid gap-4 sm:gap-6; }
+.card-grid.cols-2 { @apply grid-cols-1 md:grid-cols-2; }
+.card-grid.cols-3 { @apply grid-cols-1 md:grid-cols-2 lg:grid-cols-3; }
+.muted { @apply text-text-muted; }
+.eyebrow { @apply uppercase tracking-[0.2em] text-[11px] font-semibold text-text-muted; }
+.glass { @apply bg-surface/90 backdrop-blur-xl border border-border shadow-lg; }
+.pill { @apply px-3 py-1 rounded-full text-xs font-medium bg-secondary text-text-muted; }
+.btn-ghost { @apply inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-transparent text-sm font-medium text-text-muted hover:text-text hover:bg-secondary; }
+.btn-primary { @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-primary-foreground bg-primary hover:opacity-95 shadow-md; }
+.divider { @apply h-px bg-border; }
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { @apply bg-secondary; }
 ::-webkit-scrollbar-thumb { @apply bg-slate-400 rounded-full hover:bg-slate-500; }

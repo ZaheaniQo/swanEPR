@@ -24,6 +24,31 @@ CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING (auth.ui
 CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
 
 -- 2. GENERIC TENANT TABLES
+-- Ensure tenant_id exists on all target tables before creating policies
+DO $$
+DECLARE
+  t text;
+  tables text[] := ARRAY[
+    'settings', 'coa_accounts', 'customers', 'suppliers', 'employees', 'warehouses',
+    'products', 'product_sizes', 'inventory_stock', 'inventory_movements',
+    'contracts', 'contract_items', 'contract_milestones', 'quotations', 'quotation_items',
+    'invoices', 'invoice_items', 'receipts', 'disbursements', 'cost_centers',
+    'journal_entries', 'journal_lines', 'projects', 'project_stages', 'approvals',
+    'asset_categories', 'assets', 'asset_depreciation_schedules', 'bill_of_materials',
+    'bom_items', 'work_orders', 'salary_structures', 'leaves', 'payroll_runs', 'payslips',
+    'audit_logs'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tables LOOP
+    BEGIN
+      EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS tenant_id uuid', t);
+      EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_tenant_id ON %I(tenant_id)', t, t);
+    EXCEPTION WHEN undefined_table THEN
+      RAISE NOTICE 'Table % does not exist, skipping tenant column ensure', t;
+    END;
+  END LOOP;
+END $$;
+
 DO $$
 DECLARE
   t text;

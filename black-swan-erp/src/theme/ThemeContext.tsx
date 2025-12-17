@@ -26,8 +26,8 @@ const hexToRgb = (hex: string) => {
 export const ThemeProvider = ({ children }: PropsWithChildren) => {
   const [branding, setBranding] = useState<BrandingSettings>({
     mode: 'light',
-    primaryColor: '#0e887eff', // Default Teal
-    accentColor: '#1c3769ff', // Default Bronze
+    primaryColor: '#0e887e', // Default Teal
+    accentColor: '#1c3769', // Default Bronze
     fontFamily: 'Inter',
     logoUrl: ''
   });

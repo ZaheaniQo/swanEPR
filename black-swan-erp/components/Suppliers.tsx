@@ -27,7 +27,7 @@ const Suppliers: React.FC = () => {
     const data = await dataService.getSuppliers();
     const disbs = await dataService.getDisbursements();
     setSuppliers(data);
-    setDisbursements(disbs);
+        setDisbursements((disbs as any).items ?? disbs);
   };
 
   const handleSave = async () => {

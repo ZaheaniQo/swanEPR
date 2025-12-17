@@ -24,10 +24,12 @@ const Customers: React.FC = () => {
     setCustomers(data);
   };
 
-  const filteredCustomers = customers.filter(c => 
-      c.company.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      c.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+    const filteredCustomers = customers.filter(c => {
+      const company = (c.company || '').toLowerCase();
+      const name = (c.name || '').toLowerCase();
+      const query = searchTerm.toLowerCase();
+      return company.includes(query) || name.includes(query);
+    });
 
   const roseGoldText = 'text-[#D4A373]';
   const roseGoldBorder = 'border-[#D4A373]';
@@ -37,7 +39,7 @@ const Customers: React.FC = () => {
     <div className={`space-y-6 ${lang === 'ar' ? 'font-cairo' : 'font-inter'}`}>
         <PageHeader 
           title={t('customers.title')} 
-          subtitle="Manage client profiles and history"
+          subtitle={t('customers.subtitle')}
           actions={
             currentUserRole !== Role.PARTNER && (
               <Button onClick={() => navigate('/customers/new')} className="bg-[#D4A373] hover:bg-[#c29263] border-none">
@@ -50,10 +52,10 @@ const Customers: React.FC = () => {
         {/* Search */}
         <div className={`bg-white p-4 rounded-xl shadow-sm border ${roseGoldBorder}`}>
              <div className="relative">
-                 <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
+                <Search className={`absolute ${lang === 'ar' ? 'right-3' : 'left-3'} top-2.5 text-slate-400`} size={18} />
                  <input 
-                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-[#D4A373] focus:border-[#D4A373]"
-                    placeholder="Search customers..."
+                  className={`w-full ${lang === 'ar' ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-2 border border-slate-200 rounded-lg focus:ring-[#D4A373] focus:border-[#D4A373]`}
+                  placeholder={t('customers.search')}
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
                  />
@@ -65,11 +67,11 @@ const Customers: React.FC = () => {
              <table className="w-full text-left text-sm">
                  <thead className={`${beigeBg} text-slate-700 font-bold uppercase tracking-wider`}>
                      <tr>
-                         <th className="p-4">Customer / Company</th>
-                         <th className="p-4">Contact Info</th>
-                         <th className="p-4">Location</th>
-                         <th className="p-4">VAT No.</th>
-                         <th className="p-4 text-center">Actions</th>
+                     <th className="p-4">{t('customers.table.customerCompany')}</th>
+                     <th className="p-4">{t('customers.table.contact')}</th>
+                     <th className="p-4">{t('customers.table.location')}</th>
+                     <th className="p-4">{t('customers.table.vat')}</th>
+                     <th className="p-4 text-center">{t('customers.table.actions')}</th>
                      </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-100">
@@ -103,7 +105,7 @@ const Customers: React.FC = () => {
                              </td>
                          </tr>
                      ))}
-                     {filteredCustomers.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">No customers found.</td></tr>}
+                     {filteredCustomers.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">{t('customers.empty')}</td></tr>}
                  </tbody>
              </table>
         </div>

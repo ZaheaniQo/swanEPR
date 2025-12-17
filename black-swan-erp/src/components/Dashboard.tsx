@@ -9,24 +9,41 @@ import { PageHeader } from './ui/PageHeader';
 
 const Dashboard: React.FC = () => {
   const { t, lang } = useTranslation();
+  const { showToast } = useApp();
   const [stats, setStats] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
-        const breakEven = await dataService.getBreakEvenAnalysis();
-        const contractsResult = await dataService.getContracts();
-        const approvalReqs = await dataService.getApprovalRequests();
-        
-        setStats({ 
-            breakEven, 
-            contractCount: contractsResult.items.length, 
-            pendingApprovals: approvalReqs.filter(r => r.status === 'PENDING').length 
-        });
+        setError(null);
+        try {
+            const breakEven = await dataService.getBreakEvenAnalysis();
+            const contractsResult = await dataService.getContracts();
+            const approvalReqs = await dataService.getApprovalRequests();
+            setStats({ 
+                breakEven, 
+                contractCount: contractsResult.items.length, 
+                pendingApprovals: approvalReqs.filter(r => r.status === 'PENDING').length 
+            });
+        } catch (err) {
+            console.error(err);
+            setError(t('msg.errorLoading'));
+            setStats({ 
+                breakEven: { netProfit: 0, variableCosts: 0 },
+                contractCount: 0,
+                pendingApprovals: 0
+            });
+            showToast(t('msg.errorLoading'), 'error');
+        }
     };
     fetchData();
   }, []);
 
-  if (!stats) return <div className="p-10 flex justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div></div>;
+    if (!stats && !error) return <div className="p-10 flex justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div></div>;
+
+    if (error && !stats) {
+        return <div className="p-10 text-center text-red-600">{error}</div>;
+    }
 
   const monthlyData = [
     { name: 'Jan', revenue: 40000, expenses: 24000, breakeven: 20000 },

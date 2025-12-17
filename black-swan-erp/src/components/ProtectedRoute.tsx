@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
-  const { currentUserRole, isLoading } = useApp();
+  const { currentUserRole, isLoading, profileStatus } = useApp();
 
   if (isLoading) {
     return (

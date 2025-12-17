@@ -27,6 +27,11 @@ const Contracts: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]); 
   const [disbursements, setDisbursements] = useState<Disbursement[]>([]);
   const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
+        const [searchTerm, setSearchTerm] = useState('');
+        const [statusFilter, setStatusFilter] = useState<'ALL' | ContractStatus>('ALL');
+        const [customerFilter, setCustomerFilter] = useState<string>('');
   
   // Builder Mode State
   const [isBuilderMode, setIsBuilderMode] = useState(false);
@@ -51,23 +56,36 @@ const Contracts: React.FC = () => {
   // Payment Processing
   const [expandedContractId, setExpandedContractId] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+    useEffect(() => {
+        loadData();
+    }, []);
 
-  const loadData = async () => {
-    setLoading(true);
-    const data = await dataService.getContracts();
-    const custData = await dataService.getCustomers();
-    const disbs = await dataService.getDisbursements();
-    setContracts(data.items);
-    setCustomers(custData);
-    setDisbursements(disbs.items);
-    setLoading(false);
-  };
+    const loadData = async () => {
+        setLoading(true);
+        try {
+                const [contractsRes, custData, disbs] = await Promise.all([
+                        dataService.getContracts(),
+                        dataService.getCustomers(),
+                        dataService.getDisbursements()
+                ]);
+
+                setContracts(contractsRes.items || []);
+                setCustomers(custData || []);
+                setDisbursements(disbs.items || []);
+        } catch (err: any) {
+                console.error('Failed to load contracts', err);
+                showToast(err?.message || 'تعذر تحميل العقود، الرجاء تسجيل الدخول أو المحاولة لاحقاً', 'error');
+                setContracts([]);
+                setCustomers([]);
+                setDisbursements([]);
+        } finally {
+                setLoading(false);
+        }
+    };
 
   const handleCustomerSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
       const custId = e.target.value;
+      setSelectedCustomerId(custId);
       const cust = customers.find(c => c.id === custId);
       if (cust) {
           setDraftContract(prev => ({
@@ -126,26 +144,51 @@ const Contracts: React.FC = () => {
         return;
     }
 
+    const totalValue = Number(draftContract.totalValue || 0);
+    if (!totalValue) {
+        showToast(t('msg.fillRequired'), 'error');
+        return;
+    }
+
+    const paymentTerms = (draftContract.paymentTerms || []).map(term => {
+        const amount = term.amountType === PaymentAmountType.PERCENTAGE
+            ? Math.round(totalValue * (Number(term.value || 0) / 100))
+            : Number(term.value || term.amount || 0);
+        return { ...term, amount } as PaymentTerm;
+    });
+
     const contractToSave = {
         ...draftContract,
         id: crypto.randomUUID(),
-        contractNumber: `CN-${Date.now().toString().substr(-6)}`,
-        clientId: 'new',
+        contractNumber: `CN-${Date.now().toString().slice(-6)}`,
+        clientId: selectedCustomerId || draftContract.clientId || 'manual',
         clientName: draftContract.partyB.legalName,
         createdAt: new Date().toISOString(),
-        items: [],
-        ownerId: 'u1',
+        items: draftContract.items || [],
+        ownerId: draftContract.ownerId || 'system',
         payment1Status: PaymentStatus.PENDING, 
         payment2Status: PaymentStatus.PENDING, 
-        startDate: new Date().toISOString().split('T')[0],
-        deliveryDate: '2024-01-01',
+        startDate: draftContract.startDate || new Date().toISOString().split('T')[0],
+        deliveryDate: draftContract.deliveryDate || new Date().toISOString().split('T')[0],
+        paymentTerms,
+        status: ContractStatus.AWAITING_SIGNATURE
     } as Contract;
 
-    await dataService.addContract(contractToSave);
-    showToast(t('msg.saved'), 'success');
-    setIsBuilderMode(false);
-    setCurrentStep(1);
-    loadData();
+    try {
+        setSaving(true);
+        const saved = await dataService.addContract(contractToSave);
+        await dataService.requestContractApproval(saved.id, saved.title, saved.totalValue);
+        showToast(t('msg.saved'), 'success');
+        setIsBuilderMode(false);
+        setCurrentStep(1);
+        setSelectedCustomerId('');
+        setDraftContract(prev => ({ ...prev, title: '', partyB: { legalName: '', representativeName: '', email: '', address: '' }, paymentTerms: [], totalValue: 0 }));
+        loadData();
+    } catch (err: any) {
+        showToast(err.message || 'Failed to save', 'error');
+    } finally {
+        setSaving(false);
+    }
   };
 
   const handleSignContract = async () => {
@@ -236,7 +279,7 @@ const Contracts: React.FC = () => {
                              {/* Auto-Fill Dropdown */}
                              <div className="mb-4">
                                  <label className="label">اختر عميل حالي (تعبئة تلقائية)</label>
-                                 <select className="input-field" onChange={handleCustomerSelect}>
+                                 <select className="input-field" value={selectedCustomerId} onChange={handleCustomerSelect}>
                                      <option value="">-- اختر العميل --</option>
                                      {customers.map(c => <option key={c.id} value={c.id}>{c.company} - {c.name}</option>)}
                                  </select>
@@ -453,7 +496,12 @@ const Contracts: React.FC = () => {
                    {currentStep < 5 ? (
                        <button onClick={handleNext} className="btn-primary flex items-center gap-2">الخطوة التالية <ChevronLeft size={16}/></button>
                    ) : (
-                       <button onClick={saveContract} className="bg-teal-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-teal-700 flex items-center gap-2 shadow-lg shadow-teal-200"><Send size={16}/> إنشاء وإرسال</button>
+                       <button 
+                          onClick={saveContract} 
+                          disabled={saving}
+                          className={`bg-teal-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-teal-200 ${saving ? 'opacity-60 cursor-not-allowed' : 'hover:bg-teal-700'}`}>
+                            <Send size={16}/> {saving ? 'جاري الحفظ...' : 'إنشاء وإرسال'}
+                       </button>
                    )}
                </div>
           </div>
@@ -461,156 +509,253 @@ const Contracts: React.FC = () => {
   );
 
   const renderList = () => (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-            <h1 className="text-2xl font-bold text-slate-800">{t('contracts.title')}</h1>
-            <p className="text-slate-500">{t('contracts.subtitle')}</p>
-        </div>
-        {(currentUserRole === Role.MARKETING || currentUserRole === Role.CEO) && (
-            <button 
-                onClick={() => setIsBuilderMode(true)}
-                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg shadow-lg shadow-slate-200 transition-all"
-            >
-                <Plus size={18} /> {t('btn.create')}
-            </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 gap-6">
-        {contracts.map((contract) => {
-            const contractExpenses = disbursements.filter(d => d.contractId === contract.id);
-            const totalExpenses = contractExpenses.reduce((sum, d) => sum + d.amount, 0);
-
-            return (
-            <div key={contract.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-md transition-all">
-                <div className="p-6 cursor-pointer" onClick={() => setExpandedContractId(expandedContractId === contract.id ? null : contract.id)}>
-                    <div className="flex justify-between items-start mb-4">
-                        <div>
-                            <div className="flex items-center gap-2 mb-2">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                    contract.status === ContractStatus.SIGNED_CLIENT ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 
-                                    contract.status === ContractStatus.AWAITING_SIGNATURE ? 'bg-amber-100 text-amber-700 border-amber-200' : 
-                                    'bg-slate-100 text-slate-700 border-slate-200'
-                                }`}>
-                                    {contract.status}
-                                </span>
-                                <span className="text-xs text-slate-400 font-mono">{contract.contractNumber}</span>
-                            </div>
-                            <h3 className="text-xl font-bold text-slate-900">{contract.title}</h3>
-                            <p className="text-sm text-slate-500">{contract.clientName}</p>
+        <div className="space-y-6">
+            {(() => {
+                const totalValue = contracts.reduce((sum, c) => sum + (c.totalValue || 0), 0);
+                const signed = contracts.filter(c => c.status === ContractStatus.SIGNED_CLIENT).length;
+                const awaiting = contracts.filter(c => c.status === ContractStatus.AWAITING_SIGNATURE).length;
+                const inProduction = contracts.filter(c => c.status === ContractStatus.IN_PRODUCTION).length;
+                return (
+                    <div className="grid card-grid cols-2 lg:grid-cols-4">
+                        <div className="glass rounded-2xl p-4">
+                            <p className="eyebrow">{t('col.total')}</p>
+                            <div className="text-2xl font-bold">{contracts.length}</div>
+                            <p className="muted text-xs mt-1">{t('contracts.title')}</p>
                         </div>
-                        <div className="text-right">
-                            <p className="text-2xl font-bold text-slate-900">{contract.totalValue.toLocaleString()} {contract.currency}</p>
+                        <div className="glass rounded-2xl p-4">
+                            <p className="eyebrow">{t('col.amount')}</p>
+                            <div className="text-2xl font-bold">{totalValue.toLocaleString()} SAR</div>
+                            <p className="muted text-xs mt-1">{t('kpi.contracts')}</p>
+                        </div>
+                        <div className="glass rounded-2xl p-4">
+                            <p className="eyebrow">{t('status')}</p>
+                            <div className="text-2xl font-bold text-emerald-600">{signed}</div>
+                            <p className="muted text-xs mt-1">Signed</p>
+                        </div>
+                        <div className="glass rounded-2xl p-4">
+                            <p className="eyebrow">Pipeline</p>
+                            <div className="text-2xl font-bold text-amber-600">{awaiting || inProduction}</div>
+                            <p className="muted text-xs mt-1">Awaiting / Production</p>
                         </div>
                     </div>
+                );
+            })()}
 
-                    <div className="flex items-center justify-between border-t border-slate-50 pt-4 mt-4">
-                        <div className="flex -space-x-2">
-                            <div className="w-8 h-8 rounded-full bg-slate-200 border-2 border-white flex items-center justify-center text-xs font-bold text-slate-500" title="Provider">A</div>
-                            <div className={`w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs font-bold text-white ${contract.clientSignature ? 'bg-emerald-500' : 'bg-slate-300'}`} title="Client">B</div>
-                        </div>
-                        
-                        <div className="flex gap-2">
-                             {(contract.status === ContractStatus.IN_PRODUCTION || contract.status === ContractStatus.READY_DELIVERY) && (
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); handleCreateDeliveryNote(contract.id); }}
-                                    className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg hover:bg-slate-200 flex items-center gap-1"
-                                >
-                                    <Truck size={14} /> {t('btn.deliveryNote')}
-                                </button>
-                            )}
-
-                            {contract.status === ContractStatus.AWAITING_SIGNATURE && (
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); setViewingContractId(contract.id); setIsSignModalOpen(true); }}
-                                    className="text-xs font-bold text-white bg-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-700 flex items-center gap-1"
-                                >
-                                    <PenTool size={12} /> {t('btn.sign')}
-                                </button>
-                            )}
-                        </div>
+            <div className="glass rounded-2xl p-4 flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+                <div className="flex flex-wrap items-center gap-3">
+                    <div className="relative">
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+                        <input
+                            className="input-field pl-9 w-64"
+                            placeholder={t('search.placeholder')}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
                     </div>
+                    <select className="input-field w-44" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)}>
+                        <option value="ALL">{t('status')} — All</option>
+                        <option value={ContractStatus.AWAITING_SIGNATURE}>Awaiting Signature</option>
+                        <option value={ContractStatus.SIGNED_CLIENT}>Signed</option>
+                        <option value={ContractStatus.IN_PRODUCTION}>In Production</option>
+                        <option value={ContractStatus.DRAFT}>Draft</option>
+                    </select>
+                    <select className="input-field w-48" value={customerFilter} onChange={(e) => setCustomerFilter(e.target.value)}>
+                        <option value="">{t('menu.customers')}</option>
+                        {customers.map(c => <option key={c.id} value={c.company}>{c.company}</option>)}
+                    </select>
                 </div>
+                <div className="flex items-center gap-2">
+                    <button className="btn-ghost" onClick={() => {setSearchTerm(''); setStatusFilter('ALL'); setCustomerFilter('');}}>{t('btn.reset') || 'Reset'}</button>
+                    {(currentUserRole === Role.MARKETING || currentUserRole === Role.CEO) && (
+                        <button 
+                                onClick={() => setIsBuilderMode(true)}
+                                className="btn-primary"
+                        >
+                                <Plus size={16} /> {t('btn.create')}
+                        </button>
+                    )}
+                </div>
+            </div>
 
-                {/* Expanded Financials & Milestones */}
-                {expandedContractId === contract.id && (
-                    <div className="border-t border-slate-100 bg-slate-50 p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <div>
-                            <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><DollarSign size={16}/> {t('contracts.milestones')}</h4>
-                            <table className="w-full text-sm text-left bg-white border border-slate-200 rounded-lg overflow-hidden">
-                                <thead className="bg-slate-100 text-slate-500">
-                                    <tr>
-                                        <th className="p-3">{t('col.title')}</th>
-                                        <th className="p-3 text-right">{t('col.amount')}</th>
-                                        <th className="p-3 text-center">{t('status')}</th>
-                                        <th className="p-3 text-center">{t('actions')}</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {contract.paymentTerms?.map((term, idx) => (
-                                        <tr key={term.id || idx}>
-                                            <td className="p-3 font-medium">{term.name}</td>
-                                            <td className="p-3 text-right font-bold">{term.amount.toLocaleString()}</td>
-                                            <td className="p-3 text-center">
-                                                <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                                                    term.status === PaymentStatus.PAID ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                                                }`}>
-                                                    {term.status}
-                                                </span>
-                                            </td>
-                                            <td className="p-3 text-center">
-                                                {term.status === PaymentStatus.PENDING && (
+            {(() => {
+                const filtered = contracts.filter(c => {
+                    const matchesSearch = searchTerm ? (
+                        (c.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        (c.clientName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        (c.contractNumber || '').toLowerCase().includes(searchTerm.toLowerCase())
+                    ) : true;
+                    const matchesStatus = statusFilter === 'ALL' ? true : c.status === statusFilter;
+                    const matchesCustomer = customerFilter ? c.clientName === customerFilter || c.clientId === customerFilter : true;
+                    return matchesSearch && matchesStatus && matchesCustomer;
+                });
+
+                if (filtered.length === 0) {
+                    return (
+                        <div className="glass rounded-2xl p-10 text-center space-y-3">
+                            <div className="text-3xl">📝</div>
+                            <h3 className="text-xl font-bold text-text">{t('noData')}</h3>
+                            <p className="muted">{t('contracts.subtitle')}</p>
+                            {(currentUserRole === Role.MARKETING || currentUserRole === Role.CEO) && (
+                                <button onClick={() => setIsBuilderMode(true)} className="btn-primary mx-auto">{t('btn.create')}</button>
+                            )}
+                        </div>
+                    );
+                }
+
+                return (
+                    <div className="grid grid-cols-1 gap-6">
+                        {filtered.map((contract) => {
+                            const contractExpenses = disbursements.filter(d => d.contractId === contract.id);
+                            const totalExpenses = contractExpenses.reduce((sum, d) => sum + d.amount, 0);
+
+                            return (
+                                <div key={contract.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-md transition-all">
+                                    <div className="p-6 cursor-pointer" onClick={() => setExpandedContractId(expandedContractId === contract.id ? null : contract.id)}>
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                                        contract.status === ContractStatus.SIGNED_CLIENT ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 
+                                                        contract.status === ContractStatus.AWAITING_SIGNATURE ? 'bg-amber-100 text-amber-700 border-amber-200' : 
+                                                        'bg-slate-100 text-slate-700 border-slate-200'
+                                                    }`}>
+                                                        {contract.status}
+                                                    </span>
+                                                    <span className="text-xs text-slate-400 font-mono">{contract.contractNumber}</span>
+                                                </div>
+                                                <h3 className="text-xl font-bold text-slate-900">{contract.title}</h3>
+                                                <p className="text-sm text-slate-500">{contract.clientName}</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-2xl font-bold text-slate-900">{contract.totalValue.toLocaleString()} {contract.currency}</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center justify-between border-t border-slate-50 pt-4 mt-4">
+                                            <div className="flex -space-x-2">
+                                                <div className="w-8 h-8 rounded-full bg-slate-200 border-2 border-white flex items-center justify-center text-xs font-bold text-slate-500" title="Provider">A</div>
+                                                {(() => {
+                                                    const clientSigned = [
+                                                        ContractStatus.SIGNED_CLIENT,
+                                                        ContractStatus.IN_PRODUCTION,
+                                                        ContractStatus.READY_DELIVERY,
+                                                        ContractStatus.DELIVERED,
+                                                        ContractStatus.CLOSED
+                                                    ].includes(contract.status);
+                                                    return (
+                                                        <div
+                                                            className={`w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs font-bold text-white ${clientSigned ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                                                            title="Client"
+                                                        >
+                                                            B
+                                                        </div>
+                                                    );
+                                                })()}
+                                            </div>
+                                            
+                                            <div className="flex gap-2">
+                                                 {(contract.status === ContractStatus.IN_PRODUCTION || contract.status === ContractStatus.READY_DELIVERY) && (
                                                     <button 
-                                                        onClick={() => handlePayMilestone(contract.id, term)}
-                                                        className="bg-slate-900 text-white px-3 py-1 rounded text-xs font-bold hover:bg-slate-800 flex items-center gap-1 mx-auto"
+                                                        onClick={(e) => { e.stopPropagation(); handleCreateDeliveryNote(contract.id); }}
+                                                        className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg hover:bg-slate-200 flex items-center gap-1"
                                                     >
-                                                        <CreditCard size={12}/> {t('btn.pay')}
+                                                        <Truck size={14} /> {t('btn.deliveryNote')}
                                                     </button>
                                                 )}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        
-                        {/* Contract Related Expenses */}
-                        <div>
-                            <div className="flex justify-between items-center mb-4">
-                                <h4 className="font-bold text-slate-800 flex items-center gap-2"><TrendingDown size={16}/> {t('contracts.relatedExpenses')}</h4>
-                                <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-1 rounded">Total: -{totalExpenses.toLocaleString()}</span>
-                            </div>
-                            <table className="w-full text-sm text-left bg-white border border-slate-200 rounded-lg overflow-hidden">
-                                <thead className="bg-slate-100 text-slate-500">
-                                    <tr>
-                                        <th className="p-3">{t('col.date')}</th>
-                                        <th className="p-3">{t('lbl.category')}</th>
-                                        <th className="p-3 text-right">{t('col.amount')}</th>
-                                        <th className="p-3 text-center">{t('status')}</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {contractExpenses.map((exp) => (
-                                        <tr key={exp.id}>
-                                            <td className="p-3 text-slate-500">{exp.date}</td>
-                                            <td className="p-3 font-medium">{exp.category}</td>
-                                            <td className="p-3 text-right font-bold text-red-600">-{exp.amount.toLocaleString()}</td>
-                                            <td className="p-3 text-center text-xs text-slate-500">{exp.approvalStatus}</td>
-                                        </tr>
-                                    ))}
-                                    {contractExpenses.length === 0 && (
-                                        <tr><td colSpan={4} className="p-4 text-center text-slate-400 text-xs">No expenses recorded.</td></tr>
+
+                                                {contract.status === ContractStatus.AWAITING_SIGNATURE && (
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); setViewingContractId(contract.id); setIsSignModalOpen(true); }}
+                                                        className="text-xs font-bold text-white bg-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-700 flex items-center gap-1"
+                                                    >
+                                                        <PenTool size={12} /> {t('btn.sign')}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Expanded Financials & Milestones */}
+                                    {expandedContractId === contract.id && (
+                                        <div className="border-t border-slate-100 bg-slate-50 p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                            <div>
+                                                <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><DollarSign size={16}/> {t('contracts.milestones')}</h4>
+                                                <table className="w-full text-sm text-left bg-white border border-slate-200 rounded-lg overflow-hidden">
+                                                    <thead className="bg-slate-100 text-slate-500">
+                                                        <tr>
+                                                            <th className="p-3">{t('col.title')}</th>
+                                                            <th className="p-3 text-right">{t('col.amount')}</th>
+                                                            <th className="p-3 text-center">{t('status')}</th>
+                                                            <th className="p-3 text-center">{t('actions')}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-100">
+                                                        {contract.paymentTerms?.map((term, idx) => (
+                                                            <tr key={term.id || idx}>
+                                                                <td className="p-3 font-medium">{term.name}</td>
+                                                                <td className="p-3 text-right font-bold">{term.amount.toLocaleString()}</td>
+                                                                <td className="p-3 text-center">
+                                                                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                                                                        term.status === PaymentStatus.PAID ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                                                                    }`}>
+                                                                        {term.status}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="p-3 text-center">
+                                                                    {term.status === PaymentStatus.PENDING && (
+                                                                        <button 
+                                                                            onClick={() => handlePayMilestone(contract.id, term)}
+                                                                            className="bg-slate-900 text-white px-3 py-1 rounded text-xs font-bold hover:bg-slate-800 flex items-center gap-1 mx-auto"
+                                                                        >
+                                                                            <CreditCard size={12}/> {t('btn.pay')}
+                                                                        </button>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            
+                                            {/* Contract Related Expenses */}
+                                            <div>
+                                                <div className="flex justify-between items-center mb-4">
+                                                    <h4 className="font-bold text-slate-800 flex items-center gap-2"><TrendingDown size={16}/> {t('contracts.relatedExpenses')}</h4>
+                                                    <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-1 rounded">Total: -{totalExpenses.toLocaleString()}</span>
+                                                </div>
+                                                <table className="w-full text-sm text-left bg-white border border-slate-200 rounded-lg overflow-hidden">
+                                                    <thead className="bg-slate-100 text-slate-500">
+                                                        <tr>
+                                                            <th className="p-3">{t('col.date')}</th>
+                                                            <th className="p-3">{t('lbl.category')}</th>
+                                                            <th className="p-3 text-right">{t('col.amount')}</th>
+                                                            <th className="p-3 text-center">{t('status')}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-100">
+                                                        {contractExpenses.map((exp) => (
+                                                            <tr key={exp.id}>
+                                                                <td className="p-3 text-slate-500">{exp.date}</td>
+                                                                <td className="p-3 font-medium">{exp.category}</td>
+                                                                <td className="p-3 text-right font-bold text-red-600">-{exp.amount.toLocaleString()}</td>
+                                                                <td className="p-3 text-center text-xs text-slate-500">{exp.approvalStatus}</td>
+                                                            </tr>
+                                                        ))}
+                                                        {contractExpenses.length === 0 && (
+                                                            <tr><td colSpan={4} className="p-4 text-center text-slate-400 text-xs">No expenses recorded.</td></tr>
+                                                        )}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
                                     )}
-                                </tbody>
-                            </table>
-                        </div>
+                                </div>
+                            );
+                        })}
                     </div>
-                )}
-            </div>
-        )})}
-      </div>
-    </div>
+                );
+            })()}
+        </div>
   );
 
   return (

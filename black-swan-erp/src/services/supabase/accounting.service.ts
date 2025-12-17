@@ -7,6 +7,13 @@ const TBL_ACCOUNTS = 'coa_accounts';
 const TBL_JOURNALS = 'journal_entries';
 const TBL_JOURNAL_LINES = 'journal_lines';
 
+async function getContext() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+  const tenantId = user.app_metadata?.tenant_id || user.id;
+  return { userId: user.id, tenantId };
+}
+
 // Initial Chart of Accounts Seed Data
 const DEFAULT_COA = [
   { code: '1001', name: 'Cash on Hand', type: AccountType.ASSET },
@@ -28,29 +35,66 @@ const DEFAULT_COA = [
 export const accountingService = {
   
   async initCOA() {
-    const { count } = await supabase.from(TBL_ACCOUNTS).select('*', { count: 'exact', head: true });
-    if (count && count > 0) return; // Already initialized
+    const { tenantId } = await getContext();
+    const { count } = await supabase
+      .from(TBL_ACCOUNTS)
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId);
+    if (count && count > 0) return; // Already initialized for this tenant or global
 
     const { error } = await supabase.from(TBL_ACCOUNTS).insert(
-        DEFAULT_COA.map(acc => ({ ...acc, isSystem: true }))
+        DEFAULT_COA.map(acc => ({ ...acc, is_system: true, tenant_id: tenantId }))
     );
     if (error) console.error('Error initializing COA', error);
   },
 
   async getAccounts(): Promise<Account[]> {
-    const { data, error } = await supabase.from(TBL_ACCOUNTS).select('*').order('code', { ascending: true });
+    const { tenantId } = await getContext();
+    const { data, error } = await supabase
+      .from(TBL_ACCOUNTS)
+      .select('id, code, name, type, description, is_system:isSystem, created_at:createdAt')
+      .eq('tenant_id', tenantId)
+      .order('code', { ascending: true });
     if (error) throw error;
-    return data as Account[];
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      type: row.type,
+      description: row.description,
+      isSystem: row.isSystem
+    } as Account));
   },
 
   async getAccountByCode(code: string): Promise<Account | undefined> {
-    const { data, error } = await supabase.from(TBL_ACCOUNTS).select('*').eq('code', code).single();
+    const { tenantId } = await getContext();
+    const { data, error } = await supabase
+      .from(TBL_ACCOUNTS)
+      .select('id, code, name, type, description, is_system:isSystem')
+      .eq('code', code)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
     if (error) return undefined;
-    return data as Account;
+    return data
+      ? {
+          id: data.id,
+          code: data.code,
+          name: data.name,
+          type: data.type,
+          description: data.description,
+          isSystem: (data as any).isSystem
+        }
+      : undefined;
   },
 
   async getTrialBalance() {
-    const { data: accounts } = await supabase.from(TBL_ACCOUNTS).select('*').order('code');
+    const { tenantId } = await getContext();
+
+    const { data: accounts } = await supabase
+      .from(TBL_ACCOUNTS)
+      .select('id, code, name, type')
+      .eq('tenant_id', tenantId)
+      .order('code');
     if (!accounts) return [];
 
     const { data: lines } = await supabase
@@ -59,23 +103,20 @@ export const accountingService = {
         account_id,
         debit,
         credit,
-        journal_entries!inner(status)
+        journal_id,
+        journal_entries!inner(status, tenant_id)
       `)
-      .eq('journal_entries.status', 'POSTED');
+      .eq('journal_entries.status', 'POSTED')
+      .eq('journal_entries.tenant_id', tenantId);
 
     return accounts.map(acc => {
       const accLines = lines?.filter((l: any) => l.account_id === acc.id) || [];
-      const totalDebit = accLines.reduce((sum: number, l: any) => sum + Number(l.debit), 0);
-      const totalCredit = accLines.reduce((sum: number, l: any) => sum + Number(l.credit), 0);
+      const totalDebit = accLines.reduce((sum: number, l: any) => sum + Number(l.debit || 0), 0);
+      const totalCredit = accLines.reduce((sum: number, l: any) => sum + Number(l.credit || 0), 0);
       
-      let balance = 0;
-      // Assets and Expenses have normal Debit balance
-      if (['ASSET', 'EXPENSE'].includes(acc.type)) {
-        balance = totalDebit - totalCredit;
-      } else {
-        // Liabilities, Equity, Revenue have normal Credit balance
-        balance = totalCredit - totalDebit;
-      }
+      const balance = ['ASSET', 'EXPENSE'].includes(acc.type)
+        ? totalDebit - totalCredit
+        : totalCredit - totalDebit;
 
       return {
         id: acc.id,
@@ -84,7 +125,7 @@ export const accountingService = {
         type: acc.type,
         debit: totalDebit,
         credit: totalCredit,
-        balance: balance
+        balance
       };
     });
   },
@@ -92,9 +133,10 @@ export const accountingService = {
   // --- JOURNAL ENTRIES ---
 
   async createJournalEntry(entry: Partial<JournalEntry>): Promise<string> {
-    // 1. Validate Balance
-    const totalDebit = entry.lines?.reduce((sum, line) => sum + line.debit, 0) || 0;
-    const totalCredit = entry.lines?.reduce((sum, line) => sum + line.credit, 0) || 0;
+    const { userId, tenantId } = await getContext();
+
+    const totalDebit = entry.lines?.reduce((sum, line) => sum + (line.debit || 0), 0) || 0;
+    const totalCredit = entry.lines?.reduce((sum, line) => sum + (line.credit || 0), 0) || 0;
 
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
       throw new Error(`Journal Entry is unbalanced: Dr ${totalDebit} != Cr ${totalCredit}`);
@@ -102,36 +144,71 @@ export const accountingService = {
 
     const { lines, ...header } = entry;
 
-    // 2. Insert Header
-    const { data: je, error: jeError } = await supabase.from(TBL_JOURNALS).insert({
-      ...header,
-      status: JournalStatus.POSTED, // Auto-post for MVP
-      totalDebit,
-      totalCredit,
-      date: entry.date || new Date().toISOString()
-    }).select().single();
+    const headerPayload = {
+      entry_number: header.entryNumber || `JE-${Date.now()}`,
+      date: entry.date || new Date().toISOString(),
+      reference: header.reference,
+      description: header.description,
+      status: header.status || JournalStatus.POSTED,
+      created_by: userId,
+      tenant_id: tenantId
+    };
+
+    const { data: je, error: jeError } = await supabase
+      .from(TBL_JOURNALS)
+      .insert(headerPayload)
+      .select('id')
+      .single();
 
     if (jeError) throw jeError;
 
-    // 3. Insert Lines
     if (lines && lines.length > 0) {
-        const linesWithId = lines.map(l => ({ ...l, journalId: je.id }));
-        const { error: lineError } = await supabase.from(TBL_JOURNAL_LINES).insert(linesWithId);
-        if (lineError) throw lineError;
+      const linesPayload = lines.map(l => ({
+        journal_id: je.id,
+        account_id: l.accountId,
+        description: l.description || header.description,
+        debit: l.debit || 0,
+        credit: l.credit || 0,
+        tenant_id: tenantId
+      }));
+
+      const { error: lineError } = await supabase.from(TBL_JOURNAL_LINES).insert(linesPayload);
+      if (lineError) throw lineError;
     }
 
     return je.id;
   },
 
   async getJournalEntries(): Promise<JournalEntry[]> {
-    // Fetch headers with lines
+    const { tenantId } = await getContext();
+
     const { data, error } = await supabase
         .from(TBL_JOURNALS)
-        .select(`*, lines:${TBL_JOURNAL_LINES}(*)`)
+        .select(`id, entry_number, date, reference, description, status, created_at, created_by, tenant_id, lines:${TBL_JOURNAL_LINES}(id, account_id, description, debit, credit)`) 
+        .eq('tenant_id', tenantId)
         .order('date', { ascending: false });
     
     if (error) throw error;
-    return data as JournalEntry[];
+
+    return (data || []).map((row: any) => ({
+        id: row.id,
+        entryNumber: row.entry_number,
+        date: row.date,
+        reference: row.reference,
+        description: row.description,
+        status: row.status as JournalStatus,
+        totalDebit: Number((row.lines || []).reduce((s: number, l: any) => s + Number(l.debit || 0), 0)),
+        totalCredit: Number((row.lines || []).reduce((s: number, l: any) => s + Number(l.credit || 0), 0)),
+        createdAt: row.created_at,
+        createdBy: row.created_by,
+        lines: (row.lines || []).map((l: any) => ({
+            id: l.id,
+            accountId: l.account_id,
+            description: l.description,
+            debit: Number(l.debit || 0),
+            credit: Number(l.credit || 0)
+        }))
+    })) as JournalEntry[];
   },
 
   // --- AUTOMATED POSTING ---
@@ -149,36 +226,30 @@ export const accountingService = {
 
     // 2. Create Journal Entry
     const je: Partial<JournalEntry> = {
-        date: new Date().toISOString(),
-        description: `Invoice #${invoice.invoiceNumber} - ${invoice.buyer.name}`,
-        reference: invoice.invoiceNumber,
-        status: JournalStatus.POSTED,
-        lines: [
-            // Debit Accounts Receivable (Total)
-            {
-                accountId: accReceivable.id,
-                accountName: accReceivable.name,
-                debit: invoice.totalAmount,
-                credit: 0,
-                description: `Invoice ${invoice.invoiceNumber}`
-            },
-            // Credit Sales Revenue (Subtotal)
-            {
-                accountId: accRevenue.id,
-                accountName: accRevenue.name,
-                debit: 0,
-                credit: invoice.subtotal,
-                description: `Revenue - ${invoice.invoiceNumber}`
-            },
-            // Credit VAT Payable (Tax)
-            {
-                accountId: accVat.id,
-                accountName: accVat.name,
-                debit: 0,
-                credit: invoice.vatAmount,
-                description: `VAT - ${invoice.invoiceNumber}`
-            }
-        ]
+      date: new Date().toISOString(),
+      description: `Invoice #${invoice.invoiceNumber} - ${invoice.buyer.name}`,
+      reference: invoice.invoiceNumber,
+      status: JournalStatus.POSTED,
+      lines: [
+        {
+          accountId: accReceivable.id,
+          debit: invoice.totalAmount,
+          credit: 0,
+          description: `Invoice ${invoice.invoiceNumber}`
+        },
+        {
+          accountId: accRevenue.id,
+          debit: 0,
+          credit: invoice.subtotal,
+          description: `Revenue - ${invoice.invoiceNumber}`
+        },
+        {
+          accountId: accVat.id,
+          debit: 0,
+          credit: invoice.vatAmount,
+          description: `VAT - ${invoice.invoiceNumber}`
+        }
+      ]
     };
 
     return this.createJournalEntry(je);
@@ -217,30 +288,28 @@ export const accountingService = {
       // Better: Let's create a WIP account in the seed data if possible, or use a generic one.
       // I'll use '5000' (COGS) as the offset for now to balance it, assuming standard costing.
       
-      const je: Partial<JournalEntry> = {
+        const je: Partial<JournalEntry> = {
         date: new Date().toISOString(),
         description: `Production Completion - ${wo.number}`,
         reference: wo.number,
         status: JournalStatus.POSTED,
         lines: [
-            {
-                accountId: accInventory.id,
-                accountName: accInventory.name,
-                debit: totalCost,
-                credit: 0,
-                description: `Finished Goods - ${wo.productName}`
-            },
-            {
-                accountId: accInventory.id, // Credit the same account (Raw Materials consumed) - simplified
-                accountName: accInventory.name,
-                debit: 0,
-                credit: totalCost,
-                description: `Raw Materials Consumed`
-            }
+          {
+            accountId: accInventory.id,
+            debit: totalCost,
+            credit: 0,
+            description: `Finished Goods - ${wo.productName}`
+          },
+          {
+            accountId: accInventory.id,
+            debit: 0,
+            credit: totalCost,
+            description: `Raw Materials Consumed`
+          }
         ]
-      };
+        };
       
-      return this.createJournalEntry(je);
+        return this.createJournalEntry(je);
   },
 
   async postExpense(expense: Disbursement) {
@@ -262,30 +331,28 @@ export const accountingService = {
       
       if (!accExpense || !accCredit) throw new Error('Missing accounts for expense posting');
 
-      const je: Partial<JournalEntry> = {
+        const je: Partial<JournalEntry> = {
           date: expense.date || new Date().toISOString(),
           description: `Expense: ${expense.category} - ${expense.description}`,
           reference: expense.id.substring(0, 8),
           status: JournalStatus.POSTED,
           lines: [
-              {
-                  accountId: accExpense.id,
-                  accountName: accExpense.name,
-                  debit: expense.amount,
-                  credit: 0,
-                  description: expense.description
-              },
-              {
-                  accountId: accCredit.id,
-                  accountName: accCredit.name,
-                  debit: 0,
-                  credit: expense.amount,
-                  description: `Payment via ${expense.paymentMethod}`
-              }
+            {
+              accountId: accExpense.id,
+              debit: expense.amount,
+              credit: 0,
+              description: expense.description
+            },
+            {
+              accountId: accCredit.id,
+              debit: 0,
+              credit: expense.amount,
+              description: `Payment via ${expense.paymentMethod}`
+            }
           ]
-      };
+        };
       
-      return this.createJournalEntry(je);
+        return this.createJournalEntry(je);
   },
 
   // --- REPORTING ---

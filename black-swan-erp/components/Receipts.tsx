@@ -27,7 +27,7 @@ const Receipts: React.FC = () => {
     const r = await dataService.getReceipts();
     setReceipts(r);
     const c = await dataService.getContracts();
-    setContracts(c);
+        setContracts((c as any).items ?? c);
   };
 
   const handleContractSelect = (contractId: string) => {

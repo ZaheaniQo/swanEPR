@@ -13,7 +13,7 @@ const HR: React.FC = () => {
     dataService.getEmployees().then(setEmployees);
   }, []);
 
-  const totalPayroll = employees.reduce((acc, curr) => acc + curr.salary, 0);
+    const totalPayroll = employees.reduce((acc, curr) => acc + (curr.basicSalary || 0) + (curr.housingAllowance || 0) + (curr.transportAllowance || 0) + (curr.otherAllowances || 0), 0);
 
   return (
     <div className="space-y-6">

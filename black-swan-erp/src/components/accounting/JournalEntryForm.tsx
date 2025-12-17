@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation, useApp } from '../../AppContext';
 import { dataService } from '../../services/dataService';
 import { accountingService } from '../../services/supabase/accounting.service';
-import { JournalEntry, JournalLine, Account, AccountType } from '../../types';
+import { JournalEntry, JournalLine, Account, AccountType, JournalStatus } from '../../types';
 import { PageHeader } from '../ui/PageHeader';
 import { Button } from '../ui/Button';
 import { Input, Select } from '../ui/Input';
@@ -71,7 +71,7 @@ const JournalEntryForm: React.FC = () => {
             date: date,
             reference: reference,
             description: description,
-            status: 'POSTED', // Auto-post for MVP, or DRAFT
+            status: JournalStatus.POSTED, // Auto-post for MVP, or DRAFT
             lines: lines.map(l => ({
                 accountId: l.accountId!,
                 description: l.description || description,

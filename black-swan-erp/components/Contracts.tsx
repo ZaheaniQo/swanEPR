@@ -60,9 +60,9 @@ const Contracts: React.FC = () => {
     const data = await dataService.getContracts();
     const custData = await dataService.getCustomers();
     const disbs = await dataService.getDisbursements();
-    setContracts(data);
+        setContracts((data as any).items ?? data);
     setCustomers(custData);
-    setDisbursements(disbs);
+        setDisbursements((disbs as any).items ?? disbs);
     setLoading(false);
   };
 

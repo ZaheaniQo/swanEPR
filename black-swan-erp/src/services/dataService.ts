@@ -6,12 +6,15 @@ import {
   ContractParty, CompanySettings, TaxInvoice, InvoiceType,
   ApprovalRequest, ApprovalType, DeliveryNote, Quotation, Receipt,
   Supplier, SupplierType, Customer, Product, Disbursement,
-  PaymentTrigger, JournalEntry, JournalStatus, InvoiceStatus,
-  TaxInvoiceItem, InventoryMovement, InventoryMovementType
+    PaymentTrigger, JournalEntry, JournalStatus, InvoiceStatus,
+    TaxInvoiceItem, InventoryMovement, InventoryMovementType,
+    AccessRequest, LeaveRecord, Role
 } from '../types';
 import { supabase } from './supabaseClient';
 import * as dbCore from './supabase/core';
 import { accountingService } from './supabase/accounting.service';
+import { approvalsRepository } from '../repositories/approvalsRepository';
+import { disbursementsRepository } from '../repositories/disbursementsRepository';
 
 // Table Constants (Supabase uses snake_case usually, assuming table names)
 const TBL = {
@@ -72,15 +75,17 @@ class DataService {
    * Prevents repeated auth calls in loops.
    */
   private async _getContext() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Unauthorized');
-    
-    // In a real multi-tenant app, tenant_id is usually in app_metadata or a profile table.
-    // For this refactor, we assume it's available or handled by RLS.
-    // If we must enforce it explicitly in queries:
-    const tenantId = user.app_metadata?.tenant_id || user.id; // Fallback for dev
-    
-    return { userId: user.id, tenantId };
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        const session = data?.session;
+        const user = session?.user;
+        if (!user) throw new Error('No active session');
+
+        const tenantId = (user.user_metadata as any)?.tenant_id || (user.app_metadata as any)?.tenant_id;
+        if (!tenantId) throw new Error('Missing tenant_id');
+
+        return { userId: user.id, tenantId, user };
   }
 
   // --- EMPLOYEES ---
@@ -548,7 +553,6 @@ class DataService {
         p_items: itemsPayload,
         p_tenant_id: tenantId
     });
-    });
     
     if (error) throw error;
     
@@ -587,67 +591,159 @@ class DataService {
 
   // --- DISBURSEMENTS & APPROVALS ---
   async getDisbursements(pageSize = 50, lastId?: string): Promise<dbCore.PaginatedResult<Disbursement>> {
-      // Refactor to use raw query with tenant_id
-      const { tenantId } = await this._getContext();
-      let query = supabase.from(TBL.DISBURSEMENTS).select('*').eq('tenant_id', tenantId).order('date', { ascending: false }).limit(pageSize);
-      if (lastId) query = query.lt('id', lastId);
-      const { data } = await query;
-      const items = data as Disbursement[];
-      return { 
-          items, 
-          hasMore: (data?.length || 0) === pageSize,
-          lastId: items.length > 0 ? items[items.length - 1].id : null
-      };
+      try {
+          const { tenantId } = await this._getContext();
+          const rows = await disbursementsRepository.list({ tenantId, pageSize, lastId });
+          const items = (rows || []).map((row) => ({
+              id: row.id,
+              date: row.date,
+              category: row.category || 'General',
+              amount: Number(row.amount) || 0,
+              paymentMethod: (row.payment_method as any) || 'Cash',
+              description: row.description || '',
+              attachmentUrl: row.attachment_url || undefined,
+              approvalStatus: (row.status as any) || 'PENDING',
+              approvedBy: row.approved_by || undefined,
+              approvedAt: undefined,
+              createdBy: undefined,
+              contractId: (row as any).contract_id,
+              projectId: (row as any).project_id,
+              supplierId: (row as any).supplier_id
+          } as Disbursement));
+          return {
+              items,
+              hasMore: (rows?.length || 0) === pageSize,
+              lastId: items.length > 0 ? items[items.length - 1].id : null
+          };
+      } catch (err) {
+          console.error('getDisbursements', err);
+          return { items: [], hasMore: false, lastId: null };
+      }
   }
 
   async addDisbursement(disbursement: Partial<Disbursement>): Promise<void> {
-      const { data: d, error } = await supabase.from(TBL.DISBURSEMENTS).insert({ ...disbursement, approvalStatus: 'PENDING' }).select().single();
-      if (error) throw error;
+      const { userId, tenantId } = await this._getContext();
+      const amount = disbursement.amount ?? 0;
+      const payload = {
+          description: disbursement.description || disbursement.category || '',
+          amount,
+          date: disbursement.date || new Date().toISOString(),
+          category: disbursement.category || 'General',
+          payment_method: disbursement.paymentMethod || 'Cash',
+          status: 'PENDING',
+          approved_by: null,
+          attachment_url: disbursement.attachmentUrl || null,
+          tenant_id: tenantId
+      } as any;
+
+      const inserted = await disbursementsRepository.insert(payload);
       
       await this.createApprovalRequest({
           type: ApprovalType.EXPENSE,
           title: `Expense: ${disbursement.category}`,
           description: `${disbursement.description} (${disbursement.amount})`,
           requesterName: 'System',
+          requesterId: userId,
           date: new Date().toISOString(),
           status: 'PENDING',
-          relatedEntityId: d.id,
-          amount: disbursement.amount,
+          relatedEntityId: inserted.id,
+          amount,
           priority: 'MEDIUM'
       } as any);
   }
 
   async approveDisbursement(id: string): Promise<void> {
-      await supabase.from(TBL.DISBURSEMENTS).update({ approvalStatus: 'APPROVED' }).eq('id', id);
+      const { userId } = await this._getContext();
+      await disbursementsRepository.update(id, { status: 'APPROVED', approved_by: userId });
       // Post to Accounting via RPC? Or keep service call?
       // Ideally RPC, but for now keeping service call as it might be complex
-      const { data: d } = await supabase.from(TBL.DISBURSEMENTS).select('*').eq('id', id).single();
+      const d = await disbursementsRepository.getById(id);
       if (d) {
           // accountingService.postExpense(d); // Assuming this exists
       }
   }
 
   async getApprovalRequests(): Promise<ApprovalRequest[]> {
-      const { tenantId } = await this._getContext();
-      const { data } = await supabase.from(TBL.APPROVALS).select('*').eq('tenant_id', tenantId);
-      return data as ApprovalRequest[];
+      try {
+          const rows = await approvalsRepository.list();
+          return (rows || []).map((row) => {
+              const payload = (row.payload as any) || {};
+              return {
+                  id: row.id,
+                  type: (payload.type as ApprovalType) || (row.target_type as ApprovalType) || ApprovalType.PAYMENT,
+                  title: payload.title || payload.subject || row.target_type || 'Request',
+                  description: payload.description || row.decision_note || '',
+                  requesterId: row.requester_id || '',
+                  requesterName: row.requester_name || payload.requesterName || '',
+                  date: row.created_at,
+                  status: (row.status as any) || 'PENDING',
+                  relatedEntityId: row.target_id || payload.relatedEntityId,
+                  amount: payload.amount,
+                  priority: (payload.priority as any) || 'MEDIUM',
+                  approverId: row.decision_by || undefined,
+                  approvedAt: row.decision_at || undefined,
+                  targetType: row.target_type || undefined,
+                  targetId: row.target_id || undefined,
+                  decisionBy: row.decision_by || undefined,
+                  decisionAt: row.decision_at || undefined,
+                  decisionNote: row.decision_note || undefined,
+                  payload
+              } as ApprovalRequest;
+          });
+      } catch (err) {
+          console.error('getApprovalRequests', err);
+          return [];
+      }
   }
 
   async createApprovalRequest(req: ApprovalRequest): Promise<void> {
-      await supabase.from(TBL.APPROVALS).insert(req);
+      const { userId, user } = await this._getContext();
+      const requesterName = req.requesterName || (user?.user_metadata as any)?.full_name || user?.email || 'System';
+
+      const payload = {
+          requester_id: req.requesterId || userId,
+          requester_name: requesterName,
+          target_type: req.type,
+          target_id: req.relatedEntityId || null,
+          status: req.status || 'PENDING',
+          decision_by: null,
+          decision_at: null,
+          decision_note: null,
+          payload: {
+              title: req.title,
+              description: req.description,
+              amount: req.amount,
+              priority: req.priority,
+              type: req.type,
+              relatedEntityId: req.relatedEntityId,
+              requesterName
+          }
+      };
+
+      await approvalsRepository.insert(payload);
   }
 
   async processApproval(id: string, action: 'APPROVE' | 'REJECT'): Promise<void> {
+      const { userId } = await this._getContext();
       const status = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
-      await supabase.from(TBL.APPROVALS).update({ status }).eq('id', id);
+
+      await approvalsRepository.update(id, {
+          status,
+          decision_by: userId,
+          decision_at: new Date().toISOString(),
+          decision_note: action
+      });
       
       if (action === 'APPROVE') {
-          const { data: req } = await supabase.from(TBL.APPROVALS).select('*').eq('id', id).single();
-          if (req && req.relatedEntityId) {
-              if (req.type === ApprovalType.EXPENSE) {
-                  await this.approveDisbursement(req.relatedEntityId);
-              } else if (req.type === ApprovalType.INVOICE) {
-                  await this.approveInvoice(req.relatedEntityId);
+          const req = await approvalsRepository.getById(id);
+          if (req) {
+              const payload = (req.payload as any) || {};
+              const targetId = req.target_id || payload.relatedEntityId;
+              const targetType = (payload.type as ApprovalType) || (req.target_type as ApprovalType);
+              if (targetType === ApprovalType.EXPENSE && targetId) {
+                  await this.approveDisbursement(targetId);
+              } else if (targetType === ApprovalType.INVOICE && targetId) {
+                  await this.approveInvoice(targetId);
               }
           }
       }
@@ -1006,14 +1102,244 @@ class DataService {
   }
 
   // Legacy mappings
-  async getReceipts(): Promise<Receipt[]> { return []; }
-  async addReceipt(r: Receipt): Promise<void> { }
-  async getInvoices(): Promise<Invoice[]> { return []; } 
-  async getExpenses(): Promise<Expense[]> { return []; } 
-  async addLedgerEntry(e: any): Promise<void> { } 
-  async processOrder(c: any, t: any): Promise<void> { } 
-  async generateDeliveryNote(id: string): Promise<DeliveryNote | null> { return null; }
-  async getBreakEvenAnalysis() { return { fixedCosts: 0, variableCosts: 0, revenue: 0, breakEvenRevenue: 0, netProfit: 0 }; }
+  async getReceipts(): Promise<Receipt[]> {
+      try {
+          const { tenantId } = await this._getContext();
+          const { data, error } = await supabase
+              .from(TBL.RECEIPTS)
+              .select('id, receipt_number, contract_id, contract_title, milestone_id, customer_name, amount, date, payment_method, reference_number, notes, attachment_url')
+              .eq('tenant_id', tenantId)
+              .order('date', { ascending: false })
+              .limit(200);
+
+          if (error) {
+              console.error('getReceipts', error);
+              return [];
+          }
+
+          return (data || []).map((r: any) => ({
+              id: r.id,
+              receiptNumber: r.receipt_number || r.receiptNumber,
+              contractId: r.contract_id || r.contractId || '',
+              contractTitle: r.contract_title || r.contractTitle || '',
+              milestoneId: r.milestone_id || r.milestoneId,
+              customerName: r.customer_name || r.customerName || '',
+              amount: Number(r.amount ?? r.total_amount) || 0,
+              date: r.date,
+              paymentMethod: (r.payment_method || r.paymentMethod || 'Cash') as Receipt['paymentMethod'],
+              referenceNumber: r.reference_number || r.referenceNumber,
+              notes: r.notes,
+              attachmentUrl: r.attachment_url || r.attachmentUrl
+          })) as Receipt[];
+      } catch (err) {
+          console.error('getReceipts', err);
+          return [];
+      }
+  }
+
+  async addReceipt(r: Receipt): Promise<void> {
+      const { tenantId } = await this._getContext();
+      const payload = {
+          receipt_number: r.receiptNumber,
+          contract_id: r.contractId || null,
+          contract_title: r.contractTitle || null,
+          milestone_id: r.milestoneId || null,
+          customer_name: r.customerName,
+          amount: r.amount,
+          date: r.date || new Date().toISOString(),
+          payment_method: r.paymentMethod,
+          reference_number: r.referenceNumber || null,
+          notes: r.notes || null,
+          attachment_url: r.attachmentUrl || null,
+          tenant_id: tenantId
+      };
+
+      const { error } = await supabase.from(TBL.RECEIPTS).insert(payload);
+      if (error) throw error;
+  }
+
+  async getInvoices(): Promise<Invoice[]> {
+      try {
+          const { tenantId } = await this._getContext();
+          const { data, error } = await supabase
+              .from(TBL.INVOICES)
+              .select('id, invoice_number, contract_id, contract_title, total_amount, issue_date, status')
+              .eq('tenant_id', tenantId)
+              .order('issue_date', { ascending: false })
+              .limit(200);
+
+          if (error) {
+              console.error('getInvoices', error);
+              return [];
+          }
+
+          const rows = data || [];
+          return rows.map((row: any) => ({
+              id: row.id,
+              invoiceNumber: row.invoice_number,
+              contractId: row.contract_id || '',
+              contractTitle: row.contract_title || '',
+              amount: Number(row.total_amount) || 0,
+              dueDate: row.issue_date,
+              status: row.status as any,
+              type: 'First Payment'
+          })) as Invoice[];
+      } catch (err) {
+          console.error('getInvoices', err);
+          return [];
+      }
+  }
+
+  async getExpenses(): Promise<Expense[]> {
+      try {
+          const { tenantId } = await this._getContext();
+          const rows = await disbursementsRepository.list({ tenantId, pageSize: 200 });
+
+          return (rows || []).map((d) => ({
+              id: d.id,
+              date: d.date,
+              description: d.description || d.category || '',
+              amount: Number(d.amount) || 0,
+              category: (d.category as any) || undefined,
+              department: (d as any).department || undefined
+          })) as Expense[];
+      } catch (err) {
+          console.error('getExpenses', err);
+          return [];
+      }
+  }
+
+  async convertQuotationToContract(_quotationId: string): Promise<Contract | null> {
+      return null;
+  }
+
+  async getPendingAccessRequests(): Promise<AccessRequest[]> {
+      return [];
+  }
+
+  async activateUserProfile(_id: string, _role: Role): Promise<void> {
+      return;
+  }
+
+  async rejectUserProfile(_id: string): Promise<void> {
+      return;
+  }
+
+  async getMyProfile(): Promise<Employee | null> {
+      try {
+          const { userId } = await this._getContext();
+          const employees = await this.getEmployees();
+          return employees.find(e => e.id === userId) || null;
+      } catch (err) {
+          console.error('getMyProfile', err);
+          return null;
+      }
+  }
+
+  async getEmployeeLeaves(_employeeId: string): Promise<LeaveRecord[]> {
+      return [];
+  }
+
+  async updateMyProfile(_profile: Partial<Employee>): Promise<void> {
+      return;
+  }
+
+  async uploadEmployeeFile(_employeeId: string, _file: any): Promise<string> {
+      return '';
+  }
+
+  async requestLeaveApproval(payload: any): Promise<void> {
+      await this.createApprovalRequest({
+          type: ApprovalType.LEAVE,
+          title: payload?.title || 'Leave Request',
+          description: payload?.reason || '',
+          requesterId: payload?.employeeId,
+          requesterName: payload?.employeeName || 'Employee',
+          date: new Date().toISOString(),
+          status: 'PENDING',
+          relatedEntityId: payload?.id,
+          amount: payload?.duration,
+          priority: 'MEDIUM'
+      } as any);
+  }
+
+  async requestGeneralApproval(payload: ApprovalRequest): Promise<void> {
+      await this.createApprovalRequest(payload);
+  }
+
+  async requestContractApproval(contractId: string, title: string, totalValue?: number): Promise<void> {
+      await this.createApprovalRequest({
+          type: ApprovalType.CONTRACT,
+          title: title || 'Contract Approval',
+          description: title,
+          requesterId: '',
+          requesterName: 'System',
+          date: new Date().toISOString(),
+          status: 'PENDING',
+          relatedEntityId: contractId,
+          amount: totalValue,
+          priority: 'MEDIUM'
+      } as any);
+  }
+
+  async requestHiringApproval(payload: any): Promise<void> {
+      await this.createApprovalRequest({
+          type: ApprovalType.HIRING,
+          title: payload?.title || 'Hiring Request',
+          description: payload?.notes || '',
+          requesterId: payload?.requesterId,
+          requesterName: payload?.requesterName || 'System',
+          date: new Date().toISOString(),
+          status: 'PENDING',
+          relatedEntityId: payload?.id,
+          amount: payload?.budget,
+          priority: 'MEDIUM'
+      } as any);
+  }
+
+  async getSalaryHistory(_employeeId: string): Promise<any[]> {
+      return [];
+  }
+
+  async listEmployeeFiles(_employeeId: string): Promise<any[]> {
+      return [];
+  }
+
+  async getEmployeeAudit(_employeeId: string): Promise<any[]> {
+      return [];
+  }
+
+  async deleteEmployee(_id: string): Promise<void> {
+      return;
+  }
+
+  async deleteEmployeeFile(_path: string): Promise<void> {
+      return;
+  }
+
+  async signUpAndRequestAccess(_payload: any): Promise<void> {
+      return;
+  }
+
+  async getRoles(): Promise<Role[]> {
+      return Object.values(Role);
+  }
+
+  async addLedgerEntry(e: any): Promise<void> {
+      throw new Error('addLedgerEntry is not implemented.');
+  }
+
+  async processOrder(c: any, t: any): Promise<void> {
+      throw new Error('processOrder is not implemented.');
+  }
+
+  async generateDeliveryNote(id: string): Promise<DeliveryNote | null> { 
+      return null; 
+  }
+
+  async getBreakEvenAnalysis() { 
+      return { fixedCosts: 0, variableCosts: 0, revenue: 0, breakEvenRevenue: 0, netProfit: 0 }; 
+  }
 }
 
 export const dataService = new DataService();

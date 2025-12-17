@@ -15,14 +15,28 @@ const Quotations: React.FC = () => {
   const navigate = useNavigate();
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+    const [loading, setLoading] = useState(false);
+    const { showToast } = useApp();
 
   useEffect(() => {
-    dataService.getQuotations().then(setQuotations);
+        loadQuotations();
   }, []);
 
+    const loadQuotations = async () => {
+        setLoading(true);
+        try {
+            const data = await dataService.getQuotations();
+            setQuotations(data);
+        } catch (err: any) {
+            showToast(err.message || t('msg.errorLoading'), 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
   const filtered = quotations.filter(q => 
-      q.quotationNumber.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      q.customerName.toLowerCase().includes(searchTerm.toLowerCase())
+            q.quotationNumber.toLowerCase().includes(searchTerm.toLowerCase()) || 
+            (q.customerName || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -75,8 +89,11 @@ const Quotations: React.FC = () => {
                   </CardContent>
               </Card>
           ))}
-          {filtered.length === 0 && (
+          {filtered.length === 0 && !loading && (
               <div className="col-span-full p-10 text-center text-text-muted">{t('noData')}</div>
+          )}
+          {loading && (
+              <div className="col-span-full p-10 text-center text-text-muted">{t('loading')}</div>
           )}
       </div>
     </div>

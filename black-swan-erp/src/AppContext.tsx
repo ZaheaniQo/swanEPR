@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect, PropsWithChildren } from 'react';
 import { supabase } from './services/supabaseClient';
-import { Role } from './types';
+import { ProfileStatus, Role } from './types';
 import { TRANSLATIONS } from './constants';
 import { Session, User } from '@supabase/supabase-js';
 
@@ -15,6 +15,9 @@ interface AppState {
   currentUser: User | null;
   currentUserRole: Role;
   setRole: (r: Role) => void;
+  profileStatus: ProfileStatus | 'UNKNOWN';
+  passwordChanged: boolean;
+  setPasswordChanged: (v: boolean) => void;
   lang: 'en' | 'ar';
   dir: 'ltr' | 'rtl';
   isLoading: boolean;
@@ -30,49 +33,107 @@ const AppContext = createContext<AppState | undefined>(undefined);
 export const AppProvider = ({ children }: PropsWithChildren) => {
   const [session, setSession] = useState<Session | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [lang, setLang] = useState<'en' | 'ar'>('en');
+  const [lang, setLang] = useState<'en' | 'ar'>('ar');
   const [isLoading, setIsLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [role, setRole] = useState<Role>(Role.PARTNER); // Default
+  const [role, setRoleState] = useState<Role>(() => {
+    if (typeof window === 'undefined') return Role.PARTNER;
+    const cached = window.localStorage.getItem('bs_last_role') as Role | null;
+    return cached || Role.PARTNER;
+  });
+  const persistRole = (r: Role) => {
+    setRoleState(r);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('bs_last_role', r);
+    }
+  };
+  const [profileStatus, setProfileStatus] = useState<ProfileStatus | 'UNKNOWN'>('ACTIVE');
+  const [passwordChanged, setPasswordChanged] = useState<boolean>(false);
 
   useEffect(() => {
-    // 1. Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setCurrentUser(session?.user || null);
-      if (session?.user) fetchUserRole(session.user.id, session.user.email);
-      setIsLoading(false);
-    });
+    const loadSession = async () => {
+      setIsLoading(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        setSession(session);
+        setCurrentUser(session?.user || null);
+        if (session?.user) {
+          const metaRole = session.user.user_metadata?.role as Role | undefined;
+          if (metaRole) persistRole(metaRole);
+          setPasswordChanged(!!session.user.user_metadata?.password_changed);
+          await fetchUserRole(session.user.id, session.user.email, metaRole);
+        } else {
+          setPasswordChanged(false);
+          setIsLoading(false);
+        }
+      } catch (error) {
+        console.error('Failed to load session', error);
+        // Keep current role on error to avoid role flapping
+        setIsLoading(false);
+      }
+    };
 
-    // 2. Listen for auth changes
+    loadSession();
+
+    // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setCurrentUser(session?.user || null);
-      if (session?.user) fetchUserRole(session.user.id, session.user.email);
-      else setIsLoading(false);
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setIsLoading(true);
+      try {
+        setSession(session);
+        setCurrentUser(session?.user || null);
+        if (session?.user) {
+          const metaRole = session.user.user_metadata?.role as Role | undefined;
+          if (metaRole) persistRole(metaRole);
+          setPasswordChanged(!!session.user.user_metadata?.password_changed);
+          await fetchUserRole(session.user.id, session.user.email, metaRole);
+        } else {
+          setPasswordChanged(false);
+          setIsLoading(false);
+        }
+      } catch (error) {
+        console.error('Auth state change failed', error);
+        // Keep current role on error
+        setIsLoading(false);
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchUserRole = async (userId: string, email?: string) => {
-      if (email && email.toLowerCase() === 'yysz2006@gmail.com') {
-        setRole(Role.SUPER_ADMIN);
-        setIsLoading(false);
+  const fetchUserRole = async (userId: string, email?: string, metaRole?: Role) => {
+    try {
+      const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      if (isLocal && email && email.toLowerCase() === 'yysz2006@gmail.com') {
+        persistRole(Role.SUPER_ADMIN);
+        setProfileStatus('ACTIVE');
         return;
       }
 
-      // In Supabase, roles are often stored in a 'profiles' table or metadata
-      const { data } = await supabase.from('profiles').select('role').eq('id', userId).single();
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (error) throw error;
+
       if (data && data.role) {
-          setRole(data.role as Role);
+        persistRole(data.role as Role);
       } else {
-          // Default to CEO for demo if no profile found, or handle otherwise
-          setRole(Role.CEO); 
+        // Fallback to metadata role if available, otherwise keep current
+        if (metaRole) persistRole(metaRole);
       }
+      setProfileStatus('ACTIVE');
+    } catch (err) {
+      console.error('Failed to fetch user role', err);
+      // Keep current role to avoid flicker; optionally fall back to metadata
+      if (metaRole) persistRole(metaRole);
+      setProfileStatus('ACTIVE');
+    } finally {
       setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -84,6 +145,12 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
   const signOut = async () => {
     await supabase.auth.signOut();
     setCurrentUser(null);
+    persistRole(Role.PARTNER);
+    setProfileStatus('ACTIVE');
+    setPasswordChanged(false);
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('bs_last_role');
+    }
   };
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -99,7 +166,10 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
   const value = {
     currentUser,
     currentUserRole: role,
-    setRole,
+    setRole: persistRole,
+    profileStatus,
+    passwordChanged,
+    setPasswordChanged,
     lang,
     dir: lang === 'ar' ? 'rtl' : 'ltr' as 'rtl' | 'ltr',
     setLang,

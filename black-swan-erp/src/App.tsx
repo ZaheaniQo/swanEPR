@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import Login from './components/Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Role } from './types';
+import { FEATURE_ROLES } from './constants';
 
 // Dashboards
 import Dashboard from './components/Dashboard';
@@ -67,6 +68,25 @@ import CustomerForm from './components/customers/CustomerForm';
 
 import Products from './components/Products';
 import ProductForm from './components/products/ProductForm';
+import EmployeeProfile from './components/EmployeeProfile';
+import ChangePassword from './components/ChangePassword';
+
+const getDefaultPath = (role: Role) => {
+  switch (role) {
+    case Role.MARKETING:
+      return '/quotations';
+    case Role.ACCOUNTING:
+      return '/invoices';
+    case Role.WAREHOUSE:
+      return '/inventory';
+    case Role.PRODUCTION_MANAGER:
+      return '/production';
+    case Role.HR:
+      return '/hr';
+    default:
+      return '/dashboard';
+  }
+};
 
 const NotFound = () => (
   <div className="flex flex-col items-center justify-center h-full text-text-muted p-10">
@@ -76,7 +96,9 @@ const NotFound = () => (
 );
 
 const AppContent: React.FC = () => {
-  const { isLoading, currentUser } = useApp();
+  const { isLoading, currentUser, currentUserRole, passwordChanged } = useApp();
+  const defaultPath = getDefaultPath(currentUserRole);
+  const mustChangePassword = !!currentUser && !passwordChanged;
 
   if (isLoading) {
     return (
@@ -86,184 +108,282 @@ const AppContent: React.FC = () => {
     );
   }
 
-  if (!currentUser) {
-    return <Login />;
-  }
-
   return (
     <Routes>
-      <Route path="/" element={<Layout />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
+      <Route path="/login" element={<Login />} />
+
+      {currentUser ? (
+        mustChangePassword ? (
+          <>
+            <Route
+              path="/change-password"
+              element={
+                <ProtectedRoute allowedRoles={[Role.EMPLOYEE, Role.PARTNER, Role.HR, Role.CEO, Role.SUPER_ADMIN, Role.MARKETING, Role.WAREHOUSE, Role.ACCOUNTING, Role.PRODUCTION_MANAGER]}>
+                  <ChangePassword forceMode />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<Navigate to="/change-password" replace />} />
+          </>
+        ) : (
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Navigate to={defaultPath} replace />} />
+          
+          {/* Dashboards */}
+          <Route path="dashboard" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.dashboard}>
+              <Dashboard />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="approvals" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.approvals}>
+              <Approvals />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="compliance" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.compliance}>
+              <ComplianceDashboard />
+            </ProtectedRoute>
+          } />
+          
+          {/* Sales & Procurement */}
+          <Route path="products" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.products_view}>
+              <Products />
+            </ProtectedRoute>
+          } />
+          <Route path="products/new" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.products_write}>
+              <ProductForm />
+            </ProtectedRoute>
+          } />
+          <Route path="products/:id/edit" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.products_write}>
+              <ProductForm />
+            </ProtectedRoute>
+          } />
+
+          <Route path="quotations" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.quotations_view}>
+              <Quotations />
+            </ProtectedRoute>
+          } />
+          <Route path="quotations/new" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.quotations_write}>
+              <QuotationForm />
+            </ProtectedRoute>
+          } />
+          <Route path="quotations/:id" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.quotations_view}>
+              <QuotationDetails />
+            </ProtectedRoute>
+          } />
+
+          <Route path="contracts" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.contracts_view}>
+              <Contracts />
+            </ProtectedRoute>
+          } />
+          <Route path="contracts/new" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.contracts_write}>
+              <ContractBuilder />
+            </ProtectedRoute>
+          } />
+
+          <Route path="receipts" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.receipts_view}>
+              <Receipts />
+            </ProtectedRoute>
+          } />
+          <Route path="receipts/new" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.receipts_write}>
+              <ReceiptForm />
+            </ProtectedRoute>
+          } />
+
+          <Route path="invoices" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.invoices_view}>
+              <Invoices />
+            </ProtectedRoute>
+          } />
+          <Route path="invoices/new" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.invoices_write}>
+              <InvoiceForm />
+            </ProtectedRoute>
+          } />
+          <Route path="invoices/:id" element={<InvoiceDetails />} />
+
+          <Route path="disbursements" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.disbursements_view}>
+              <Disbursements />
+            </ProtectedRoute>
+          } />
+          <Route path="disbursements/new" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.disbursements_write}>
+              <DisbursementForm />
+            </ProtectedRoute>
+          } />
+
+          <Route path="suppliers" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.suppliers_view}>
+              <Suppliers />
+            </ProtectedRoute>
+          } />
+          <Route path="suppliers/new" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.suppliers_write}>
+              <SupplierForm />
+            </ProtectedRoute>
+          } />
+          <Route path="suppliers/:id/edit" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.suppliers_write}>
+              <SupplierForm />
+            </ProtectedRoute>
+          } />
+
+          <Route path="customers" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.customers_view}>
+              <Customers />
+            </ProtectedRoute>
+          } />
+          <Route path="customers/new" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.customers_write}>
+              <CustomerForm />
+            </ProtectedRoute>
+          } />
+          <Route path="customers/:id/edit" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.customers_write}>
+              <CustomerForm />
+            </ProtectedRoute>
+          } />
+
+          <Route path="my-profile" element={
+            <ProtectedRoute>
+              <EmployeeProfile />
+            </ProtectedRoute>
+          } />
+
+          <Route path="change-password" element={
+            <ProtectedRoute>
+              <ChangePassword />
+            </ProtectedRoute>
+          } />
+
+          {/* Operations */}
+          <Route path="inventory" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.inventory_view}>
+              <Inventory />
+            </ProtectedRoute>
+          } />
+          <Route path="settings" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.settings}>
+              <Settings />
+            </ProtectedRoute>
+          } />
         
-        {/* Dashboards */}
-        <Route path="dashboard" element={<Dashboard />} />
+            {/* HR */}
+            <Route path="hr" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.hr_view}>
+                <HR />
+              </ProtectedRoute>
+            } />
+            <Route path="hr/new" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.hr_write}>
+                <EmployeeForm />
+              </ProtectedRoute>
+            } />
+            <Route path="hr/:id/edit" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.hr_write}>
+                <EmployeeForm />
+              </ProtectedRoute>
+            } />
+            <Route path="payroll" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.payroll_view}>
+                <Payroll />
+              </ProtectedRoute>
+            } />
         
-        <Route path="approvals" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.PARTNER]}>
-            <Approvals />
-          </ProtectedRoute>
-        } />
+            {/* Partners */}
+            <Route path="partners" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.partners_view}>
+                <Partners />
+              </ProtectedRoute>
+            } />
         
-        <Route path="compliance" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING, Role.PARTNER]}>
-            <ComplianceDashboard />
-          </ProtectedRoute>
-        } />
+            {/* Production */}
+            <Route path="production" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.production_view}>
+                <Production />
+              </ProtectedRoute>
+            } />
+            <Route path="production/bom" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.production_write}>
+                <BOMForm />
+              </ProtectedRoute>
+            } />
+            <Route path="production/boms/new" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.production_write}>
+                <BOMForm />
+              </ProtectedRoute>
+            } />
+            <Route path="production/work-order" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.production_write}>
+                <WorkOrderForm />
+              </ProtectedRoute>
+            } />
+            <Route path="production/work-orders/new" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.production_write}>
+                <WorkOrderForm />
+              </ProtectedRoute>
+            } />
         
-        {/* Sales & Procurement */}
-        <Route path="products" element={<Products />} />
-        <Route path="products/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.PRODUCTION_MANAGER, Role.WAREHOUSE]}>
-            <ProductForm />
-          </ProtectedRoute>
-        } />
-        <Route path="products/:id/edit" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.PRODUCTION_MANAGER, Role.WAREHOUSE]}>
-            <ProductForm />
-          </ProtectedRoute>
-        } />
-
-        <Route path="quotations" element={<Quotations />} />
-        <Route path="quotations/new" element={<QuotationForm />} />
-        <Route path="quotations/:id" element={<QuotationDetails />} />
-
-        <Route path="contracts" element={<Contracts />} />
-        <Route path="contracts/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.MARKETING]}>
-            <ContractBuilder />
-          </ProtectedRoute>
-        } />
-
-        <Route path="receipts" element={<Receipts />} />
-        <Route path="receipts/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING]}>
-            <ReceiptForm />
-          </ProtectedRoute>
-        } />
-
-        <Route path="invoices" element={<Invoices />} />
-        <Route path="invoices/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING]}>
-            <InvoiceForm />
-          </ProtectedRoute>
-        } />
-        <Route path="invoices/:id" element={<InvoiceDetails />} />
-
-        <Route path="disbursements" element={<Disbursements />} />
-        <Route path="disbursements/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING]}>
-            <DisbursementForm />
-          </ProtectedRoute>
-        } />
-
-        <Route path="suppliers" element={<Suppliers />} />
-        <Route path="suppliers/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING, Role.WAREHOUSE]}>
-            <SupplierForm />
-          </ProtectedRoute>
-        } />
-        <Route path="suppliers/:id/edit" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING, Role.WAREHOUSE]}>
-            <SupplierForm />
-          </ProtectedRoute>
-        } />
-
-        <Route path="customers" element={<Customers />} />
-        <Route path="customers/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.MARKETING, Role.ACCOUNTING]}>
-            <CustomerForm />
-          </ProtectedRoute>
-        } />
-        <Route path="customers/:id/edit" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.MARKETING, Role.ACCOUNTING]}>
-            <CustomerForm />
-          </ProtectedRoute>
-        } />
-
-        {/* Operations */}
-        <Route path="inventory" element={<Inventory />} />
-        <Route path="inventory/transaction" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.WAREHOUSE, Role.PRODUCTION_MANAGER]}>
-            <InventoryTransaction />
-          </ProtectedRoute>
-        } />
+            {/* Inventory */}
+            <Route path="inventory" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.inventory_view}>
+                <Inventory />
+              </ProtectedRoute>
+            } />
+            <Route path="inventory/transaction" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.inventory_write}>
+                <InventoryTransaction />
+              </ProtectedRoute>
+            } />
         
-        <Route path="production" element={<Production />} />
-        <Route path="production/boms/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.PRODUCTION_MANAGER]}>
-            <BOMForm />
-          </ProtectedRoute>
-        } />
-        <Route path="production/work-orders/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.PRODUCTION_MANAGER]}>
-            <WorkOrderForm />
-          </ProtectedRoute>
-        } />
+            {/* Accounting */}
+            <Route path="accounting" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.accounting_view}>
+                <Accounting />
+              </ProtectedRoute>
+            } />
+            <Route path="journal" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.accounting_write}>
+                <JournalEntryForm />
+              </ProtectedRoute>
+            } />
+            <Route path="trial-balance" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.accounting_view}>
+                <TrialBalance />
+              </ProtectedRoute>
+            } />
+            <Route path="assets" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.assets_view}>
+                <Assets />
+              </ProtectedRoute>
+            } />
+            <Route path="assets/new" element={
+              <ProtectedRoute allowedRoles={FEATURE_ROLES.assets_write}>
+                <AssetForm />
+              </ProtectedRoute>
+            } />
+        
+            <Route path="*" element={<NotFound />} />
+          </Route>
+        )
+      ) : (
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      )}
 
-        {/* Admin & Finance */}
-        <Route path="accounting" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING, Role.PARTNER]}>
-            <Accounting />
-          </ProtectedRoute>
-        } />
-        <Route path="accounting/entries/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING]}>
-            <JournalEntryForm />
-          </ProtectedRoute>
-        } />
-        <Route path="accounting/trial-balance" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING, Role.PARTNER]}>
-            <TrialBalance />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="assets" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING]}>
-            <Assets />
-          </ProtectedRoute>
-        } />
-        <Route path="assets/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING]}>
-            <AssetForm />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="hr" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.HR]}>
-            <HR />
-          </ProtectedRoute>
-        } />
-        <Route path="hr/new" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.HR]}>
-            <EmployeeForm />
-          </ProtectedRoute>
-        } />
-        <Route path="hr/:id/edit" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.HR]}>
-            <EmployeeForm />
-          </ProtectedRoute>
-        } />
-
-        <Route path="payroll" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.HR, Role.ACCOUNTING]}>
-            <Payroll />
-          </ProtectedRoute>
-        } />
-
-        <Route path="partners" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.PARTNER]}>
-            <Partners />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="settings" element={
-          <ProtectedRoute allowedRoles={[Role.CEO, Role.ACCOUNTING]}>
-            <Settings />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="*" element={<NotFound />} />
-      </Route>
     </Routes>
   );
 };

@@ -31,14 +31,14 @@ const Disbursements: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     const d = await dataService.getDisbursements();
-    setDisbursements(d);
+        setDisbursements((d as any).items ?? d);
     
     // Load related entities for dropdowns
     const s = await dataService.getSuppliers();
     const c = await dataService.getContracts();
     const p = await dataService.getProjects();
     setSuppliers(s);
-    setContracts(c);
+        setContracts((c as any).items ?? c);
     setProjects(p);
     
     setLoading(false);

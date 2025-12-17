@@ -1,24 +1,26 @@
 
 import React, { useState, useEffect } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useApp, useTranslation } from '../AppContext';
 import { useTheme } from '../theme/ThemeContext';
 import { Role } from '../types';
+import { FEATURE_ROLES } from '../constants';
 import { 
   LayoutDashboard, FileText, Package, DollarSign, Users, Menu, Globe, Shield, 
   Factory, Briefcase, X, CheckCircle, AlertCircle, Info, Search, Bell, 
   ChevronLeft, ChevronRight, Settings, CheckSquare, FileBadge, Receipt, 
-  FileCheck, Truck, UserCheck, Tag, Wallet, ShieldCheck, Moon, Sun,
-  Building, Banknote
+  FileCheck, Truck, UserCheck, Tag, Wallet, ShieldCheck, Moon, Sun, User,
+  Building, Banknote, LogOut
 } from 'lucide-react';
 import { dataService } from '../services/dataService';
 import AIChatbot from './AIChatbot';
 
 const Layout: React.FC = () => {
-  const { currentUserRole, toasts, removeToast, setRole } = useApp();
+  const { currentUserRole, toasts, removeToast, setRole, signOut, showToast } = useApp();
   const { t, lang, toggleLang, dir } = useTranslation();
   const { mode, setMode, logoUrl } = useTheme();
   const location = useLocation();
+  const navigate = useNavigate();
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
@@ -55,26 +57,29 @@ const Layout: React.FC = () => {
     return () => clearInterval(interval);
   }, [currentUserRole, location.pathname]);
 
+  const allRoles = Object.values(Role) as Role[];
+
   const menuItems = [
-    { id: 'dashboard', path: '/dashboard', icon: LayoutDashboard, label: 'menu.dashboard', roles: [Role.CEO, Role.PARTNER, Role.ACCOUNTING, Role.MARKETING, Role.WAREHOUSE, Role.PRODUCTION_MANAGER] },
-    { id: 'approvals', path: '/approvals', icon: CheckSquare, label: 'menu.approvals', roles: [Role.CEO], badge: pendingApprovals },
-    { id: 'compliance', path: '/compliance', icon: ShieldCheck, label: 'menu.compliance', roles: [Role.CEO, Role.ACCOUNTING, Role.PARTNER] },
-    { id: 'products', path: '/products', icon: Tag, label: 'menu.products', roles: [Role.CEO, Role.MARKETING, Role.WAREHOUSE, Role.PRODUCTION_MANAGER] },
-    { id: 'quotations', path: '/quotations', icon: FileBadge, label: 'menu.quotations', roles: [Role.CEO, Role.MARKETING, Role.ACCOUNTING] },
-    { id: 'contracts', path: '/contracts', icon: FileText, label: 'menu.contracts', roles: [Role.CEO, Role.MARKETING, Role.ACCOUNTING, Role.PRODUCTION_MANAGER] },
-    { id: 'receipts', path: '/receipts', icon: Receipt, label: 'menu.receipts', roles: [Role.CEO, Role.ACCOUNTING] },
-    { id: 'invoices', path: '/invoices', icon: FileCheck, label: 'menu.invoices', roles: [Role.CEO, Role.ACCOUNTING, Role.PARTNER] },
-    { id: 'disbursements', path: '/disbursements', icon: Wallet, label: 'menu.disbursements', roles: [Role.CEO, Role.ACCOUNTING] },
-    { id: 'production', path: '/production', icon: Factory, label: 'menu.production', roles: [Role.CEO, Role.PRODUCTION_MANAGER, Role.WAREHOUSE] },
-    { id: 'inventory', path: '/inventory', icon: Package, label: 'menu.inventory', roles: [Role.CEO, Role.WAREHOUSE, Role.PRODUCTION_MANAGER] },
-    { id: 'suppliers', path: '/suppliers', icon: Truck, label: 'menu.suppliers', roles: [Role.CEO, Role.WAREHOUSE, Role.ACCOUNTING, Role.PRODUCTION_MANAGER] },
-    { id: 'customers', path: '/customers', icon: UserCheck, label: 'menu.customers', roles: [Role.CEO, Role.MARKETING, Role.ACCOUNTING] },
-    { id: 'accounting', path: '/accounting', icon: DollarSign, label: 'menu.accounting', roles: [Role.CEO, Role.ACCOUNTING, Role.PARTNER] },
-    { id: 'assets', path: '/assets', icon: Building, label: 'menu.assets', roles: [Role.CEO, Role.ACCOUNTING] },
-    { id: 'hr', path: '/hr', icon: Users, label: 'menu.hr', roles: [Role.CEO, Role.HR] },
-    { id: 'payroll', path: '/payroll', icon: Banknote, label: 'menu.payroll', roles: [Role.CEO, Role.HR, Role.ACCOUNTING] },
-    { id: 'partners', path: '/partners', icon: Briefcase, label: 'menu.partners', roles: [Role.CEO, Role.PARTNER] },
-    { id: 'settings', path: '/settings', icon: Settings, label: 'menu.settings', roles: [Role.CEO, Role.ACCOUNTING] },
+    { id: 'dashboard', path: '/dashboard', icon: LayoutDashboard, label: 'menu.dashboard', roles: FEATURE_ROLES.dashboard },
+    { id: 'approvals', path: '/approvals', icon: CheckSquare, label: 'menu.approvals', roles: FEATURE_ROLES.approvals, badge: pendingApprovals },
+    { id: 'compliance', path: '/compliance', icon: ShieldCheck, label: 'menu.compliance', roles: FEATURE_ROLES.compliance },
+    { id: 'my-profile', path: '/my-profile', icon: User, label: 'Profile', roles: allRoles },
+    { id: 'products', path: '/products', icon: Tag, label: 'menu.products', roles: FEATURE_ROLES.products_view },
+    { id: 'quotations', path: '/quotations', icon: FileBadge, label: 'menu.quotations', roles: FEATURE_ROLES.quotations_view },
+    { id: 'contracts', path: '/contracts', icon: FileText, label: 'menu.contracts', roles: FEATURE_ROLES.contracts_view },
+    { id: 'receipts', path: '/receipts', icon: Receipt, label: 'menu.receipts', roles: FEATURE_ROLES.receipts_view },
+    { id: 'invoices', path: '/invoices', icon: FileCheck, label: 'menu.invoices', roles: FEATURE_ROLES.invoices_view },
+    { id: 'disbursements', path: '/disbursements', icon: Wallet, label: 'menu.disbursements', roles: FEATURE_ROLES.disbursements_view },
+    { id: 'production', path: '/production', icon: Factory, label: 'menu.production', roles: FEATURE_ROLES.production_view },
+    { id: 'inventory', path: '/inventory', icon: Package, label: 'menu.inventory', roles: FEATURE_ROLES.inventory_view },
+    { id: 'suppliers', path: '/suppliers', icon: Truck, label: 'menu.suppliers', roles: FEATURE_ROLES.suppliers_view },
+    { id: 'customers', path: '/customers', icon: UserCheck, label: 'menu.customers', roles: FEATURE_ROLES.customers_view },
+    { id: 'accounting', path: '/accounting', icon: DollarSign, label: 'menu.accounting', roles: FEATURE_ROLES.accounting_view },
+    { id: 'assets', path: '/assets', icon: Building, label: 'menu.assets', roles: FEATURE_ROLES.assets },
+    { id: 'hr', path: '/hr', icon: Users, label: 'menu.hr', roles: FEATURE_ROLES.hr },
+    { id: 'payroll', path: '/payroll', icon: Banknote, label: 'menu.payroll', roles: FEATURE_ROLES.payroll },
+    { id: 'partners', path: '/partners', icon: Briefcase, label: 'menu.partners', roles: FEATURE_ROLES.partners },
+    { id: 'settings', path: '/settings', icon: Settings, label: 'menu.settings', roles: FEATURE_ROLES.settings },
   ];
 
   const filteredMenu = menuItems.filter(item => item.roles.includes(currentUserRole));
@@ -83,6 +88,16 @@ const Layout: React.FC = () => {
 
   const toggleTheme = () => {
     setMode(mode === 'dark' ? 'light' : 'dark');
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      showToast(lang === 'ar' ? 'تم تسجيل الخروج' : 'Signed out');
+      navigate('/login');
+    } catch (err: any) {
+      showToast(err?.message || (lang === 'ar' ? 'تعذر تسجيل الخروج' : 'Sign out failed'), 'error');
+    }
   };
 
   return (
@@ -156,11 +171,18 @@ const Layout: React.FC = () => {
               </div>
             )}
           </div>
+          <button
+            onClick={handleSignOut}
+            className={`mt-3 w-full flex items-center gap-3 px-3 py-2 rounded-xl border border-slate-700/60 text-slate-200 hover:bg-slate-800 hover:border-slate-600 transition-colors ${(!isSidebarOpen && !isMobile) ? 'justify-center' : ''}`}
+          >
+            <LogOut size={18} />
+            {(isSidebarOpen || isMobile) && <span className="text-sm font-semibold">{lang === 'ar' ? 'تسجيل الخروج' : 'Sign out'}</span>}
+          </button>
         </div>
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 transition-all duration-300">
-        <header className="sticky top-0 z-30 h-18 bg-surface/80 backdrop-blur-xl border-b border-border shadow-sm flex items-center justify-between px-4 md:px-8">
+        <header className="sticky top-0 z-30 h-18 bg-surface/90 backdrop-blur-xl border-b border-border shadow-sm flex items-center justify-between px-4 md:px-8">
             <div className="flex items-center gap-4">
                 <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-secondary rounded-lg text-text-muted transition-colors focus:outline-none">
                     {isMobile ? <Menu size={22} /> : (lang === 'ar' ? (isSidebarOpen ? <ChevronRight size={20} /> : <Menu size={20} />) : (isSidebarOpen ? <ChevronLeft size={20} /> : <Menu size={20} />))}
@@ -219,10 +241,29 @@ const Layout: React.FC = () => {
             </div>
         </header>
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-background relative custom-scrollbar">
-            <div className="relative z-10 p-4 md:p-8 max-w-7xl mx-auto">
-                <Outlet />
-            </div>
+          <div className="relative z-10 py-6 md:py-10 page-shell section-gap">
+            <Outlet />
+          </div>
         </main>
+
+        <footer className="mt-auto bg-surface/90 border-t border-border backdrop-blur-xl">
+          <div className="page-shell py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-sm text-text-muted">
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-bold">B</div>
+              <div>
+                <div className="font-semibold text-text">{companyName}</div>
+                <div className="text-xs text-text-muted">{t('dashboard.overview')}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="pill">{t('app.name')}</span>
+              <span className="pill">{lang === 'ar' ? 'AR' : 'EN'}</span>
+              <span className="pill">{mode === 'dark' ? t('theme.dark') : t('theme.light')}</span>
+            </div>
+            <div className="text-xs md:text-sm text-text-muted">© {new Date().getFullYear()} Black Swan ERP</div>
+          </div>
+        </footer>
+
         <AIChatbot />
       </div>
     </div>

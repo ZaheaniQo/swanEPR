@@ -6,47 +6,52 @@ import { accountingService } from "./accounting.service";
 const TBL_AUDIT = 'audit_logs';
 const TBL_INVOICES = 'invoices';
 
+const getContext = async () => {
+  const { data } = await supabase.auth.getUser();
+  if (!data.user) throw new Error('Unauthorized');
+  const tenantId = data.user.app_metadata?.tenant_id || data.user.id;
+  return { tenantId };
+};
+
 export const complianceService = {
 
   // --- VAT REPORTING ---
   
   async getVATReport(startDate: string, endDate: string) {
-    // 1. Output VAT (Sales)
+    const { tenantId } = await getContext();
+
     const { data: invoices, error } = await supabase
-        .from(TBL_INVOICES)
-        .select('*')
-        .gte('issueDate', startDate)
-        .lte('issueDate', endDate)
-        .in('status', ['POSTED', 'SENT_TO_ZATCA']); // Assuming 'PAID' or 'POSTED' implies tax liability
+      .from(TBL_INVOICES)
+      .select('id, type, status, subtotal, vat_amount, issue_date, total_amount')
+      .eq('tenant_id', tenantId)
+      .gte('issue_date', startDate)
+      .lte('issue_date', endDate)
+      .in('status', ['POSTED', 'SENT_TO_ZATCA', 'PAID']);
 
     if (error) throw error;
 
-    const standardInvoices = invoices.filter((i: any) => i.type === InvoiceType.STANDARD);
-    const simplifiedInvoices = invoices.filter((i: any) => i.type === InvoiceType.SIMPLIFIED);
+    const safeInvoices = invoices || [];
+    const standardInvoices = safeInvoices.filter((i: any) => i.type === InvoiceType.STANDARD);
+    const simplifiedInvoices = safeInvoices.filter((i: any) => i.type === InvoiceType.SIMPLIFIED);
 
-    const outputVat = invoices.reduce((sum: number, inv: any) => sum + inv.vatAmount, 0);
-    const totalSales = invoices.reduce((sum: number, inv: any) => sum + inv.subtotal, 0);
+    const outputVat = safeInvoices.reduce((sum: number, inv: any) => sum + (inv.vat_amount || inv.vatAmount || 0), 0);
+    const totalSales = safeInvoices.reduce((sum: number, inv: any) => sum + (inv.subtotal || 0), 0);
 
-    // 2. Input VAT (Purchases)
-    // Simplified logic: querying GL lines for VAT Receivable account
-    // Ideally you query a 'bills' or 'expenses' table
     const ledger = await accountingService.getJournalEntries();
-    
-    // Find account ID for "VAT Receivable"
     const accounts = await accountingService.getAccounts();
-    const vatInputAcc = accounts.find(a => a.code === '2101'); 
+    const vatInputAcc = accounts.find(a => a.code === '2101');
 
     let inputVat = 0;
     if (vatInputAcc) {
-        const inputVatEntries = ledger.filter(
-            j => j.date >= startDate && j.date <= endDate && 
-            j.lines.some(l => l.accountId === vatInputAcc.id)
-        );
-        
-        inputVat = inputVatEntries.reduce((sum, j) => {
-            const line = j.lines.find(l => l.accountId === vatInputAcc.id);
-            return sum + (line ? line.debit : 0); 
-        }, 0);
+      const inputVatEntries = ledger.filter(
+        j => j.date >= startDate && j.date <= endDate &&
+        j.lines.some(l => l.accountId === vatInputAcc.id)
+      );
+
+      inputVat = inputVatEntries.reduce((sum, j) => {
+        const line = j.lines.find(l => l.accountId === vatInputAcc.id);
+        return sum + (line ? line.debit : 0);
+      }, 0);
     }
 
     return {
@@ -58,7 +63,7 @@ export const complianceService = {
         totalVat: outputVat
       },
       input: {
-        totalPurchases: inputVat * 6.67, // Approx base if 15%
+        totalPurchases: inputVat * 6.67,
         totalVat: inputVat
       },
       netPayable: outputVat - inputVat
@@ -115,31 +120,43 @@ export const complianceService = {
     entityId: string, 
     details: any
   ) {
-    const detailsStr = JSON.stringify(details);
-    const hashInput = `${userId}:${action}:${entityId}:${new Date().toISOString()}:${detailsStr}`;
-    const hash = btoa(hashInput); // Simple hash for demo
+    const payload = {
+      table_name: entityType,
+      record_id: entityId,
+      operation: action,
+      new_data: { ...details, userName },
+      changed_by: userId,
+      changed_at: new Date().toISOString()
+    } as const;
 
-    await supabase.from(TBL_AUDIT).insert({
-        userId,
-        userName,
-        action,
-        entityType,
-        entityId,
-        details: detailsStr,
-        timestamp: new Date().toISOString(),
-        hash
-    });
+    const { error } = await supabase.from(TBL_AUDIT).insert(payload);
+    if (error) throw error;
   },
 
   async getAuditLogs(entityId?: string) {
-      let query = supabase.from(TBL_AUDIT).select('*').order('timestamp', { ascending: false });
-      if(entityId) {
-          query = query.eq('entityId', entityId);
+      let query = supabase
+        .from(TBL_AUDIT)
+        .select('id, table_name, record_id, operation, changed_by, changed_at, new_data, old_data')
+        .order('changed_at', { ascending: false });
+
+      if (entityId) {
+        query = query.eq('record_id', entityId);
       }
       
       const { data, error } = await query;
       if (error) throw error;
-      return data as AuditLog[];
+
+      return (data || []).map((row: any) => ({
+        id: row.id,
+        action: row.operation,
+        entityType: row.table_name,
+        entityId: row.record_id,
+        userId: row.changed_by,
+        userName: row.new_data?.userName || row.changed_by,
+        timestamp: row.changed_at,
+        details: JSON.stringify(row.new_data || row.old_data || {}),
+        hash: ''
+      })) as AuditLog[];
   },
 
   // --- GOVERNANCE CHECKS ---

@@ -24,12 +24,12 @@ const Accounting: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    const l = await dataService.getLedgerEntries();
-    setLedger(l);
-    const i = await dataService.getInvoices();
-    setInvoices(i);
-    const e = await dataService.getExpenses();
-    setExpenses(e);
+        const l = await dataService.getLedgerEntries();
+        setLedger((l as any).items ?? (l as any));
+        const i = await dataService.getInvoices();
+        setInvoices((i as any).items ?? i);
+        const e = await dataService.getExpenses();
+        setExpenses((e as any).items ?? e);
   };
 
   const handleAddEntry = async () => {

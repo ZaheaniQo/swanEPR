@@ -1,6 +1,13 @@
 
 import { supabase } from '../supabaseClient';
 
+const getContext = async () => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+  const tenantId = user.app_metadata?.tenant_id || user.id;
+  return { tenantId };
+};
+
 export interface PaginatedResult<T> {
   items: T[];
   lastId: string | null;
@@ -8,7 +15,13 @@ export interface PaginatedResult<T> {
 }
 
 export const getList = async <T>(table: string, queryBuilder?: (query: any) => any): Promise<T[]> => {
-  let query = supabase.from(table).select('*');
+  const { tenantId } = await getContext();
+
+  let query = supabase
+    .from(table)
+    .select('*')
+    .eq('tenant_id', tenantId);
+
   if (queryBuilder) {
     query = queryBuilder(query);
   }
@@ -24,12 +37,14 @@ export const getPaginatedList = async <T>(
   queryBuilder?: (query: any) => any
 ): Promise<PaginatedResult<T>> => {
   const { pageSize, lastId, orderByField = 'created_at', orderDir = 'desc' } = options;
+  const { tenantId } = await getContext();
   
   // Basic range pagination (simple implementation)
   // For production, cursor-based pagination using the lastId value filter is better
   let query = supabase
     .from(table)
     .select('*')
+    .eq('tenant_id', tenantId)
     .order(orderByField, { ascending: orderDir === 'asc' })
     .limit(pageSize + 1);
 
@@ -51,30 +66,59 @@ export const getPaginatedList = async <T>(
 };
 
 export const getById = async <T>(table: string, id: string): Promise<T | null> => {
-  const { data, error } = await supabase.from(table).select('*').eq('id', id).single();
+  const { tenantId } = await getContext();
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+    .single();
   if (error) throw error;
   return data as T;
 };
 
 export const create = async <T>(table: string, item: any): Promise<T> => {
-  const { data, error } = await supabase.from(table).insert(item).select().single();
+  const { tenantId } = await getContext();
+  const itemWithTenant = item && item.tenant_id ? item : { ...item, tenant_id: tenantId };
+
+  const { data, error } = await supabase.from(table).insert(itemWithTenant).select().single();
   if (error) throw error;
   return data as T;
 };
 
 export const update = async <T>(table: string, id: string, updates: any): Promise<T> => {
-  const { data, error } = await supabase.from(table).update(updates).eq('id', id).select().single();
+  const { tenantId } = await getContext();
+  const updatesWithTenant = updates && updates.tenant_id ? updates : { ...updates, tenant_id: tenantId };
+
+  const { data, error } = await supabase
+    .from(table)
+    .update(updatesWithTenant)
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+    .select()
+    .single();
   if (error) throw error;
   return data as T;
 };
 
 export const remove = async (table: string, id: string): Promise<void> => {
-  const { error } = await supabase.from(table).delete().eq('id', id);
+  const { tenantId } = await getContext();
+  const { error } = await supabase
+    .from(table)
+    .delete()
+    .eq('id', id)
+    .eq('tenant_id', tenantId);
   if (error) throw error;
 };
 
 export const getOne = async <T>(table: string, id: string): Promise<T | undefined> => {
-  const { data, error } = await supabase.from(table).select('*').eq('id', id).single();
+  const { tenantId } = await getContext();
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+    .single();
   if (error) return undefined;
   return data as T;
 };

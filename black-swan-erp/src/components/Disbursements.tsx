@@ -13,6 +13,7 @@ const Disbursements: React.FC = () => {
   const navigate = useNavigate();
   const [disbursements, setDisbursements] = useState<Disbursement[]>([]);
   const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     loadData();
@@ -25,6 +26,18 @@ const Disbursements: React.FC = () => {
     setLoading(false);
   };
 
+    const statusLabel = (status: string) => {
+        switch (status) {
+            case 'APPROVED':
+                return t('approvals.status.approved');
+            case 'REJECTED':
+                return t('approvals.status.rejected');
+            case 'PENDING':
+            default:
+                return t('approvals.status.pending');
+        }
+    };
+
   return (
     <div className="space-y-6">
        <PageHeader 
@@ -32,7 +45,7 @@ const Disbursements: React.FC = () => {
             subtitle={t('disbursements.subtitle')}
             actions={
                 <Button onClick={() => navigate('/disbursements/new')} className="bg-[#D4A373] hover:bg-[#c29263] border-none text-white">
-                    <Plus size={18} className="mr-2" /> {t('btn.newExpense')}
+                        <Plus size={18} className="mr-2" /> {t('btn.newExpense')}
                 </Button>
             }
        />
@@ -41,7 +54,12 @@ const Disbursements: React.FC = () => {
            <div className="p-4 border-b border-slate-100 flex gap-4">
                <div className="relative flex-1">
                     <Search className={`absolute ${lang === 'ar' ? 'right-3' : 'left-3'} top-2.5 text-slate-400`} size={18} />
-                    <input className={`w-full ${lang === 'ar' ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-2 border border-slate-200 rounded-lg focus:ring-[#D4A373] focus:border-[#D4A373]`} placeholder={t('search.placeholder')} />
+                                        <input 
+                                            className={`w-full ${lang === 'ar' ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-2 border border-slate-200 rounded-lg focus:ring-[#D4A373] focus:border-[#D4A373]`} 
+                                            placeholder={t('search.placeholder')}
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                        />
                </div>
            </div>
            
@@ -70,7 +88,7 @@ const Disbursements: React.FC = () => {
                                {d.projectName && <div className="flex items-center gap-1 text-indigo-600"><FileText size={12}/> {d.projectName}</div>}
                            </td>
                            <td className="p-4 text-slate-500">{d.paymentMethod}</td>
-                           <td className="p-4 text-right font-bold text-slate-800">{d.amount.toLocaleString()}</td>
+                           <td className="p-4 text-right font-bold text-slate-800">{d.amount.toLocaleString()} {t('currency')}</td>
                            <td className="p-4 text-center">
                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold border ${
                                    d.approvalStatus === 'APPROVED' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
@@ -79,13 +97,13 @@ const Disbursements: React.FC = () => {
                                }`}>
                                    {d.approvalStatus === 'APPROVED' ? <CheckCircle size={12}/> : 
                                     d.approvalStatus === 'REJECTED' ? <XCircle size={12}/> : <Clock size={12}/>}
-                                   {d.approvalStatus}
+                                   {statusLabel(d.approvalStatus)}
                                </span>
                            </td>
                        </tr>
                    ))}
                    {disbursements.length === 0 && (
-                       <tr><td colSpan={6} className="p-8 text-center text-slate-400">{t('production.noProjects')} (No records)</td></tr>
+                       <tr><td colSpan={6} className="p-8 text-center text-slate-400">{t('disbursements.empty')}</td></tr>
                    )}
                </tbody>
            </table>

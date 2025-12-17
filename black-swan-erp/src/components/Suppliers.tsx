@@ -102,13 +102,15 @@ const Suppliers: React.FC = () => {
                          </div>
                          <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-bold">{s.type}</span>
                      </div>
-                     <h3 className="text-xl font-bold text-slate-800 mb-1">{s.company}</h3>
-                     <p className="text-sm text-slate-500 mb-4 flex items-center gap-1"><User size={14} className="inline"/> {s.name}</p>
+                    <h3 className="text-xl font-bold text-slate-800 mb-1">{s.company || s.name}</h3>
+                    <p className="text-sm text-slate-500 mb-4 flex items-center gap-1"><User size={14} className="inline"/> {s.contactPerson || s.name}</p>
                      
                      <div className="space-y-2 text-sm text-slate-600 border-t border-slate-100 pt-4">
                          <p><strong>{t('col.phone')}:</strong> {s.phone}</p>
                          <p><strong>{t('col.email')}:</strong> {s.email}</p>
-                         <p className="truncate"><strong>{t('lbl.address')}:</strong> {s.address}</p>
+                        <p><strong>VAT:</strong> {s.vatNumber || '—'}</p>
+                        <p><strong>CR:</strong> {s.crNumber || '—'}</p>
+                        <p className="truncate"><strong>{t('lbl.address')}:</strong> {s.address}</p>
                      </div>
                      
                      <div className="mt-4 bg-red-50 p-2 rounded text-center text-xs font-bold text-red-600 border border-red-100">

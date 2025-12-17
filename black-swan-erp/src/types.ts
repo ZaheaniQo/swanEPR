@@ -11,7 +11,10 @@ export enum Role {
   HR = 'HR',
   PRODUCTION_MANAGER = 'PRODUCTION_MANAGER',
   PARTNER = 'PARTNER', // Read-only
+  EMPLOYEE = 'EMPLOYEE'
 }
+
+export type ProfileStatus = 'PENDING' | 'ACTIVE' | 'REJECTED';
 
 export enum ContractStatus {
   DRAFT = 'Draft',
@@ -81,7 +84,8 @@ export enum ApprovalType {
   HIRING = 'New Hire',
   LEAVE = 'Leave Request',
   INVOICE = 'Invoice Approval',
-  JOURNAL = 'Journal Entry'
+  JOURNAL = 'Journal Entry',
+  ACCESS = 'Access Request'
 }
 
 export interface ApprovalRequest {
@@ -98,6 +102,21 @@ export interface ApprovalRequest {
   priority: 'LOW' | 'MEDIUM' | 'HIGH';
   approverId?: string;
   approvedAt?: string;
+  targetType?: string;
+  targetId?: string;
+  decisionBy?: string;
+  decisionAt?: string;
+  decisionNote?: string;
+  payload?: Record<string, any>;
+}
+
+export interface AccessRequest {
+  id: string;
+  email: string;
+  fullName?: string;
+  status: ProfileStatus;
+  role?: Role;
+  createdAt?: string;
 }
 
 // --- FINANCIAL DISBURSEMENTS ---
@@ -115,6 +134,7 @@ export interface Disbursement {
   description: string;
   attachmentUrl?: string;
   approvalStatus: DisbursementStatus;
+  status?: DisbursementStatus;
   createdBy?: string;
   approvedBy?: string;
   approvedAt?: string;
@@ -388,9 +408,13 @@ export interface Employee {
   id: string;
   name: string;
   role: string;
+  systemRole?: Role; // System access role
   department: string;
   status: 'Active' | 'On Leave' | 'Terminated';
   joinDate: string;
+  contractDurationDays?: number;
+  iqamaExpiry?: string;
+  passportExpiry?: string;
   
   // Personal Info
   nationality?: string;
@@ -398,11 +422,14 @@ export interface Employee {
   email?: string;
   phone?: string;
   photoUrl?: string;
+  avatarUrl?: string;
   
   // Employment
   contractType?: 'Full-time' | 'Part-time' | 'Contractor';
   iban?: string;
   bankName?: string;
+  adminNotes?: string;
+  disabled?: boolean;
 
   // Financials
   basicSalary: number;
@@ -798,6 +825,7 @@ export interface SalaryStructure {
   otherAllowances: number;
   gosiDeductionPercent: number;
   effectiveDate: string;
+  createdAt?: string;
 }
 
 export interface PayrollRun {

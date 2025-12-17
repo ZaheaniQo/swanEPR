@@ -11,11 +11,6 @@ import { PageHeader } from './ui/PageHeader';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 
-// --- Helpers ---
-const getBuyerName = (buyer: any): string => {
-  return buyer?.legalName ?? buyer?.name ?? 'N/A';
-};
-
 const formatCurrency = (amount: number, currency: string = 'SAR') => {
   if (isNaN(amount) || amount === null) return '0.00';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
@@ -25,6 +20,9 @@ const Invoices: React.FC = () => {
   const { currentUserRole, showToast } = useApp();
   const { t, lang } = useTranslation();
   const navigate = useNavigate();
+    const getBuyerName = useCallback((buyer: any): string => {
+        return buyer?.legalName ?? buyer?.name ?? t('common.na');
+    }, [t]);
   
   const canManage = [Role.CEO, Role.ACCOUNTING].includes(currentUserRole);
 
@@ -75,6 +73,21 @@ const Invoices: React.FC = () => {
     return matchesSearch && matchesStatus;
   });
 
+    const statusLabel = (status: InvoiceStatus | 'SENT_TO_ZATCA' | 'ALL') => {
+        switch (status) {
+            case InvoiceStatus.DRAFT:
+                return t('invoices.status.draft');
+            case InvoiceStatus.APPROVED:
+                return t('invoices.status.approved');
+            case InvoiceStatus.POSTED:
+                return t('invoices.status.posted');
+            case 'SENT_TO_ZATCA':
+                return t('invoices.status.reported');
+            default:
+                return t('filter.all');
+        }
+    };
+
   return (
     <div className="space-y-6">
         <PageHeader 
@@ -106,10 +119,10 @@ const Invoices: React.FC = () => {
                     onChange={(e) => setStatusFilter(e.target.value)}
                 >
                     <option value="ALL">{t('filter.all')}</option>
-                    <option value={InvoiceStatus.DRAFT}>Draft</option>
-                    <option value={InvoiceStatus.APPROVED}>Approved</option>
-                    <option value={InvoiceStatus.POSTED}>Posted</option>
-                    <option value="SENT_TO_ZATCA">Reported</option>
+                    <option value={InvoiceStatus.DRAFT}>{statusLabel(InvoiceStatus.DRAFT)}</option>
+                    <option value={InvoiceStatus.APPROVED}>{statusLabel(InvoiceStatus.APPROVED)}</option>
+                    <option value={InvoiceStatus.POSTED}>{statusLabel(InvoiceStatus.POSTED)}</option>
+                    <option value="SENT_TO_ZATCA">{statusLabel('SENT_TO_ZATCA')}</option>
                 </select>
                 <Button variant="outline" onClick={() => loadData(true)} title="Refresh">
                     <RefreshCw size={18} />
@@ -144,7 +157,7 @@ const Invoices: React.FC = () => {
                                     'bg-slate-100 text-slate-700'
                                 }`}>
                                     {inv.status === InvoiceStatus.POSTED && <Lock size={12}/>}
-                                    {inv.status}
+                                    {statusLabel(inv.status)}
                                 </span>
                             </td>
                             <td className="p-4 text-center">
@@ -170,7 +183,7 @@ const Invoices: React.FC = () => {
                         <span className={`px-2 py-1 rounded text-xs font-bold ${
                             inv.status === InvoiceStatus.POSTED ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
                         }`}>
-                            {inv.status}
+                            {statusLabel(inv.status)}
                         </span>
                     </div>
                     <div className="mb-3">

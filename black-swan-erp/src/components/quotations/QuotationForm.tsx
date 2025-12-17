@@ -17,9 +17,12 @@ const QuotationForm: React.FC = () => {
   
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [quotation, setQuotation] = useState<Partial<Quotation>>({
       customerName: '', customerCompany: '', customerPhone: '', customerEmail: '',
+      customerAddress: '', customerVat: '',
       date: new Date().toISOString().split('T')[0],
+      expiryDate: new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0],
       items: []
   });
 
@@ -34,14 +37,18 @@ const QuotationForm: React.FC = () => {
   }, []);
 
   const handleCustomerSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const cust = customers.find(c => c.id === e.target.value);
+      const custId = e.target.value;
+      setSelectedCustomerId(custId);
+      const cust = customers.find(c => c.id === custId);
       if (cust) {
           setQuotation(prev => ({
               ...prev,
               customerName: cust.name,
               customerCompany: cust.company,
               customerPhone: cust.phone,
-              customerEmail: cust.email
+              customerEmail: cust.email,
+              customerAddress: cust.address,
+              customerVat: cust.vatNumber
           }));
       }
   };
@@ -70,7 +77,7 @@ const QuotationForm: React.FC = () => {
   };
 
   const handleSave = async () => {
-      if (!quotation.customerName || !quotation.items?.length) {
+      if (!quotation.customerName || !quotation.items?.length || !selectedCustomerId) {
           showToast(t('msg.fillRequired'), 'error');
           return;
       }
@@ -81,11 +88,11 @@ const QuotationForm: React.FC = () => {
           ...quotation,
           id: crypto.randomUUID(),
           quotationNumber: `QT-${Date.now().toString().substr(-6)}`,
+          customerId: selectedCustomerId,
           subtotal,
           vatAmount: vat,
           totalAmount: subtotal + vat,
-          status: 'PENDING',
-          expiryDate: new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0]
+          status: 'PENDING'
       } as Quotation;
 
       await dataService.addQuotation(newQ);
@@ -100,13 +107,16 @@ const QuotationForm: React.FC = () => {
         <Card>
             <CardContent className="p-6 space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Select label={t('quotations.customerSelect')} onChange={handleCustomerSelect}>
+                    <Select label={t('quotations.customerSelect')} value={selectedCustomerId} onChange={handleCustomerSelect}>
                         <option value="">-- Select --</option>
                         {customers.map(c => <option key={c.id} value={c.id}>{c.company} - {c.name}</option>)}
                     </Select>
                     <Input label={t('quotations.customerName')} value={quotation.customerName} onChange={e => setQuotation({...quotation, customerName: e.target.value})} />
                     <Input label={t('col.company')} value={quotation.customerCompany} onChange={e => setQuotation({...quotation, customerCompany: e.target.value})} />
                     <Input label={t('col.date')} type="date" value={quotation.date} onChange={e => setQuotation({...quotation, date: e.target.value})} />
+                    <Input label={t('quotations.expiry')} type="date" value={quotation.expiryDate} onChange={e => setQuotation({...quotation, expiryDate: e.target.value})} />
+                    <Input label={t('col.address')} value={quotation.customerAddress} onChange={e => setQuotation({...quotation, customerAddress: e.target.value})} />
+                    <Input label="VAT" value={quotation.customerVat} onChange={e => setQuotation({...quotation, customerVat: e.target.value})} className="font-mono" />
                 </div>
 
                 <div className="border-t border-border pt-6">
@@ -116,7 +126,7 @@ const QuotationForm: React.FC = () => {
                     </div>
                     {quotation.items?.map((item, idx) => (
                         <div key={item.id} className="grid grid-cols-12 gap-2 mb-2 items-end bg-secondary/20 p-2 rounded">
-                            <div className="col-span-5">
+                            <div className="col-span-2">
                                 <Input placeholder={t('quotations.item')} value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} />
                             </div>
                             <div className="col-span-2">

@@ -7,7 +7,7 @@ interface PageHeaderProps {
   actions?: React.ReactNode;
 }
 
-export const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle, actions }) => {
+const PageHeaderComponent: React.FC<PageHeaderProps> = ({ title, subtitle, actions }) => {
   return (
     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
       <div>
@@ -18,3 +18,6 @@ export const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle, actions
     </div>
   );
 };
+
+// Memoized to avoid rerender unless props change
+export const PageHeader = React.memo(PageHeaderComponent);

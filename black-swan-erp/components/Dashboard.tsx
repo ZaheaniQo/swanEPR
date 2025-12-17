@@ -14,10 +14,11 @@ const Dashboard: React.FC = () => {
         const breakEven = await dataService.getBreakEvenAnalysis();
         const contracts = await dataService.getContracts();
         const approvalReqs = await dataService.getApprovalRequests();
+        const contractCount = (contracts as any).items ? (contracts as any).items.length : (contracts as any).length;
         
         setStats({ 
             breakEven, 
-            contractCount: contracts.length,
+            contractCount,
             pendingApprovals: approvalReqs.filter(r => r.status === 'PENDING').length 
         });
     };

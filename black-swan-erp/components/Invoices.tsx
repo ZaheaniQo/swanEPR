@@ -18,7 +18,7 @@ const Invoices: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     const data = await dataService.getTaxInvoices();
-    setInvoices(data);
+        setInvoices((data as any).items ?? data);
     setLoading(false);
   };
 

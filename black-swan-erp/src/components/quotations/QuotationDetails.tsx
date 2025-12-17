@@ -7,14 +7,15 @@ import { Quotation } from '../../types';
 import { PageHeader } from '../ui/PageHeader';
 import { Button } from '../ui/Button';
 import { Card, CardContent } from '../ui/Card';
-import { Printer, Mail, ArrowRightCircle, FileText } from 'lucide-react';
+import { Printer, Mail, FileSignature } from 'lucide-react';
 
 const QuotationDetails: React.FC = () => {
   const { id } = useParams<{id: string}>();
   const navigate = useNavigate();
-  const { showToast } = useApp();
+    const { showToast } = useApp();
   const { t } = useTranslation();
   const [quotation, setQuotation] = useState<Quotation | null>(null);
+    const [converting, setConverting] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -22,23 +23,21 @@ const QuotationDetails: React.FC = () => {
     }
   }, [id]);
 
-  const handleConvert = async () => {
-      if (quotation) {
+  const handleConvertToContract = async () => {
+      if (!quotation || converting) return;
+      setConverting(true);
+      try {
           const contract = await dataService.convertQuotationToContract(quotation.id);
           if (contract) {
-              showToast('Converted to Contract', 'success');
-              navigate('/contracts');
+              showToast('Converted to Contract & sent for approval', 'success');
+              navigate(`/contracts`);
+          } else {
+              showToast('Unable to convert quotation', 'error');
           }
-      }
-  };
-
-  const handleConvertToInvoice = async () => {
-      if (quotation) {
-          const inv = await dataService.convertQuotationToInvoice(quotation.id);
-          if (inv) {
-              showToast('Converted to Invoice', 'success');
-              navigate(`/invoices/${inv.id}`);
-          }
+      } catch (err: any) {
+          showToast(err.message || 'Conversion failed', 'error');
+      } finally {
+          setConverting(false);
       }
   };
 
@@ -52,10 +51,9 @@ const QuotationDetails: React.FC = () => {
                 <div className="flex gap-2">
                     <Button variant="outline" onClick={() => window.print()}><Printer size={16} className="mr-2"/> {t('btn.print')}</Button>
                     {quotation.status === 'PENDING' && (
-                        <>
-                            <Button onClick={handleConvert} variant="outline"><ArrowRightCircle size={16} className="mr-2"/> {t('btn.convertToContract')}</Button>
-                            <Button onClick={handleConvertToInvoice}><FileText size={16} className="mr-2"/> Convert to Invoice</Button>
-                        </>
+                        <Button onClick={handleConvertToContract} disabled={converting}>
+                            <FileSignature size={16} className="mr-2"/> {converting ? 'Converting...' : 'Convert to Contract'}
+                        </Button>
                     )}
                 </div>
             }
@@ -94,6 +92,8 @@ const QuotationDetails: React.FC = () => {
                             <th className="p-3">{t('quotations.item')}</th>
                             <th className="p-3 text-center">{t('col.quantity')}</th>
                             <th className="p-3 text-right">{t('quotations.unitPrice')}</th>
+                            <p>{quotation.customerAddress}</p>
+                            <p>{quotation.customerVat}</p>
                             <th className="p-3 text-right">{t('quotations.total')}</th>
                         </tr>
                     </thead>
