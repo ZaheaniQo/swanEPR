@@ -9,14 +9,14 @@ DROP POLICY IF EXISTS "settings_tenant_r" ON settings;
 DROP POLICY IF EXISTS "settings_tenant_w" ON settings;
 CREATE POLICY "settings_tenant_r" ON settings
   FOR SELECT USING (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   );
 CREATE POLICY "settings_tenant_w" ON settings
   FOR ALL USING (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   )
   WITH CHECK (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   );
 
 -- Invoices
@@ -28,14 +28,14 @@ DROP POLICY IF EXISTS "invoices_tenant_r" ON invoices;
 DROP POLICY IF EXISTS "invoices_tenant_w" ON invoices;
 CREATE POLICY "invoices_tenant_r" ON invoices
   FOR SELECT USING (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   );
 CREATE POLICY "invoices_tenant_w" ON invoices
   FOR ALL USING (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   )
   WITH CHECK (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   );
 
 -- Invoice items
@@ -47,14 +47,14 @@ DROP POLICY IF EXISTS "invoice_items_tenant_r" ON invoice_items;
 DROP POLICY IF EXISTS "invoice_items_tenant_w" ON invoice_items;
 CREATE POLICY "invoice_items_tenant_r" ON invoice_items
   FOR SELECT USING (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   );
 CREATE POLICY "invoice_items_tenant_w" ON invoice_items
   FOR ALL USING (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   )
   WITH CHECK (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   );
 
 -- Disbursements
@@ -66,14 +66,14 @@ DROP POLICY IF EXISTS "disbursements_tenant_r" ON disbursements;
 DROP POLICY IF EXISTS "disbursements_tenant_w" ON disbursements;
 CREATE POLICY "disbursements_tenant_r" ON disbursements
   FOR SELECT USING (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   );
 CREATE POLICY "disbursements_tenant_w" ON disbursements
   FOR ALL USING (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   )
   WITH CHECK (
-    tenant_id IS NULL OR tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
   );
 
 -- Receipts already aligned in 20251216020000_align_receipts.sql

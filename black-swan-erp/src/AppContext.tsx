@@ -36,6 +36,18 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
   const [lang, setLang] = useState<'en' | 'ar'>('ar');
   const [isLoading, setIsLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const AUTH_TIMEOUT_MS = 8000;
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string) => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<T>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
   const [role, setRoleState] = useState<Role>(() => {
     if (typeof window === 'undefined') return Role.PARTNER;
     const cached = window.localStorage.getItem('bs_last_role') as Role | null;
@@ -54,7 +66,7 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
     const loadSession = async () => {
       setIsLoading(true);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session } } = await withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS, 'getSession');
         setSession(session);
         setCurrentUser(session?.user || null);
         if (session?.user) {
@@ -105,17 +117,25 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
   const fetchUserRole = async (userId: string, email?: string, metaRole?: Role) => {
     try {
       const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      if (isLocal && email && email.toLowerCase() === 'yysz2006@gmail.com') {
+      const isDev = !!(import.meta as any).env?.DEV;
+      const devSuperAdminEmail = (import.meta as any).env?.VITE_DEV_SUPERADMIN_EMAIL as string | undefined;
+      if (isDev && isLocal && devSuperAdminEmail && email && email.toLowerCase() === devSuperAdminEmail.toLowerCase()) {
         persistRole(Role.SUPER_ADMIN);
         setProfileStatus('ACTIVE');
         return;
       }
 
-      const { data, error } = await supabase
+      const roleQuery = supabase
         .from('profiles')
         .select('role')
         .eq('id', userId)
         .maybeSingle();
+
+      const { data, error } = await withTimeout(
+        roleQuery as unknown as Promise<{ data: { role?: Role } | null; error: any }>,
+        AUTH_TIMEOUT_MS,
+        'fetchUserRole'
+      );
 
       if (error) throw error;
 

@@ -1,4 +1,4 @@
-
+﻿
 import { 
   Contract, ContractStatus, InventoryItem, Employee, Project, 
   ProjectStageStatus, PaymentStatus, InventoryTransactionType, 
@@ -15,6 +15,7 @@ import * as dbCore from './supabase/core';
 import { accountingService } from './supabase/accounting.service';
 import { approvalsRepository } from '../repositories/approvalsRepository';
 import { disbursementsRepository } from '../repositories/disbursementsRepository';
+import { TenantError } from '../utils/tenantGuard';
 
 // Table Constants (Supabase uses snake_case usually, assuming table names)
 const TBL = {
@@ -40,6 +41,8 @@ const TBL = {
   PRODUCT_SIZES: 'product_sizes',
   QUOTATIONS: 'quotations',
   QUOTATION_ITEMS: 'quotation_items',
+  ORDERS: 'orders',
+  ORDER_ITEMS: 'order_items',
   SETTINGS: 'settings',
   ACCOUNTS: 'coa_accounts'
 };
@@ -68,6 +71,168 @@ const mapProduct = (row: any): Product => ({
   availability: row.availability
 });
 
+const mapContractRow = (row: any): Contract => {
+  const partyB = row.party_b || row.partyB || {};
+  const items = (row.items || row.contract_items || []).map((i: any) => ({
+    id: i.id,
+    productName: i.product_name || i.productName || '',
+    quantity: Number(i.quantity || 0),
+    unitPrice: Number(i.unit_price || i.unitPrice || 0),
+    productId: i.product_id || i.productId,
+    sizeId: i.size_id || i.sizeId
+  }));
+  const milestones = (row.milestones || row.contract_milestones || []).map((m: any) => {
+    const percentage = Number(m.percentage ?? m.value ?? 0);
+    const amount = Number(m.amount ?? 0);
+    return {
+      id: m.id,
+      contractId: m.contract_id || m.contractId || row.id,
+      name: m.title || m.name || '',
+      amountType: percentage ? PaymentAmountType.PERCENTAGE : PaymentAmountType.FIXED,
+      value: percentage,
+      amount,
+      dueDate: m.due_date || m.dueDate,
+      trigger: PaymentTrigger.CUSTOM,
+      status: (m.status as PaymentStatus) || PaymentStatus.PENDING,
+      notes: m.notes || undefined,
+      paidAt: m.paid_at || m.paidAt
+    } as PaymentTerm;
+  });
+  const paymentTerms = milestones.length > 0 ? milestones : (row.payment_terms || row.paymentTerms || []);
+
+  return {
+    id: row.id,
+    contractNumber: row.contract_number || row.contractNumber || '',
+    clientId: row.client_id || row.clientId || '',
+    clientName: row.client_name || row.clientName || partyB.legalName || partyB.representativeName || '',
+    title: row.title || '',
+    totalValue: Number(row.total_value || row.totalValue || 0),
+    status: row.status as ContractStatus,
+    startDate: row.start_date || row.startDate || '',
+    deliveryDate: row.delivery_date || row.deliveryDate || '',
+    items,
+    partyA: row.party_a || row.partyA,
+    partyB: row.party_b || row.partyB,
+    paymentTerms,
+    currency: row.currency || 'SAR',
+    payment1Status: (row.payment1Status as PaymentStatus) || (paymentTerms[0]?.status as PaymentStatus) || PaymentStatus.PENDING,
+    payment2Status: (row.payment2Status as PaymentStatus) || (paymentTerms[1]?.status as PaymentStatus) || PaymentStatus.PENDING,
+    createdAt: row.created_at || row.createdAt || '',
+    ownerId: row.created_by || row.ownerId || '',
+    notes: row.notes,
+    clientSignature: row.client_signature || row.clientSignature,
+    ceoSignature: row.ceo_signature || row.ceoSignature
+  };
+};
+
+const mapQuotationRow = (row: any): Quotation => {
+  const details = row.customer_details || row.customerDetails || {};
+  const items = (row.items || row.quotation_items || []).map((i: any) => {
+    const quantity = Number(i.quantity || 0);
+    const unitPrice = Number(i.unit_price || i.unitPrice || 0);
+    return {
+      id: i.id,
+      description: i.description || '',
+      quantity,
+      unitPrice,
+      total: Number(i.total || i.amount || quantity * unitPrice),
+      productId: i.product_id || i.productId,
+      sizeId: i.size_id || i.sizeId
+    };
+  });
+
+  return {
+    id: row.id,
+    quotationNumber: row.quotation_number || row.quotationNumber || '',
+    customerId: row.customer_id || row.customerId,
+    customerName: details.name || row.customer_name || row.customerName || '',
+    customerPhone: details.phone || row.customer_phone || row.customerPhone,
+    customerEmail: details.email || row.customer_email || row.customerEmail,
+    customerCompany: details.company || row.customer_company || row.customerCompany,
+    customerAddress: details.address || row.customer_address || row.customerAddress,
+    customerVat: details.vatNumber || row.customer_vat || row.customerVat,
+    date: row.date || '',
+    expiryDate: row.expiry_date || row.expiryDate || '',
+    items,
+    subtotal: Number(row.subtotal || row.subtotal_amount || row.subtotalAmount || 0),
+    vatAmount: Number(row.vat_amount || row.vatAmount || 0),
+    totalAmount: Number(row.total_amount || row.totalAmount || 0),
+    status: row.status as any,
+    notes: row.notes
+  };
+};
+
+const mapProjectRow = (row: any): Project => ({
+  id: row.id,
+  contractId: row.contract_id || row.contractId || '',
+  contractNumber: row.contract_number || row.contractNumber || '',
+  name: row.name || '',
+  status: row.status,
+  progress: Number(row.progress || 0),
+  stages: (row.stages || row.project_stages || []).map((s: any) => ({
+    id: s.id,
+    name: s.name,
+    status: s.status,
+    assignedTo: s.assigned_to || s.assignedTo,
+    startDate: s.start_date || s.startDate,
+    endDate: s.end_date || s.endDate,
+    notes: s.notes
+  }))
+});
+
+const mapTaxInvoiceRow = (row: any): TaxInvoice => {
+  const buyer = row.buyer || row.customer || {};
+  const seller = row.seller || {
+    legalName: 'Black Swan Co.',
+    vatNumber: '300000000000003',
+    address: 'Riyadh, SA',
+    country: 'SA',
+    crNumber: '1010000000',
+    logoUrl: ''
+  };
+  const items = (row.items || row.invoice_items || []).map((i: any) => {
+    const quantity = Number(i.quantity || 0);
+    const unitPrice = Number(i.unit_price || i.unitPrice || 0);
+    const netAmount = Number(i.net_amount || i.netAmount || quantity * unitPrice);
+    const vatRate = Number(i.vat_rate || i.vatRate || 0.15);
+    const vatAmount = Number(i.vat_amount || i.vatAmount || netAmount * vatRate);
+    const totalAmount = Number(i.total_amount || i.totalAmount || netAmount + vatAmount);
+    return {
+      description: i.description || '',
+      quantity,
+      unitPrice,
+      netAmount,
+      vatRate,
+      vatAmount,
+      totalAmount
+    };
+  });
+
+  return {
+    id: row.id,
+    invoiceNumber: row.invoice_number || row.invoiceNumber || '',
+    type: row.type,
+    issueDate: row.issue_date || row.issueDate || '',
+    dueDate: row.due_date || row.dueDate,
+    seller,
+    buyer: {
+      name: buyer.name || buyer.legalName || buyer.company_name || buyer.companyName || '',
+      vatNumber: buyer.vat_number || buyer.vatNumber,
+      address: buyer.address
+    },
+    items,
+    subtotal: Number(row.subtotal || row.subtotalAmount || 0),
+    vatAmount: Number(row.vat_amount || row.vatAmount || 0),
+    totalAmount: Number(row.total_amount || row.totalAmount || 0),
+    currency: row.currency || 'SAR',
+    status: row.status,
+    zatcaUuid: row.zatca_uuid || row.zatcaUuid,
+    qrCodeData: row.qr_code || row.qrCodeData,
+    createdBy: row.created_by || 'system',
+    updatedAt: row.updated_at || row.updatedAt
+  } as TaxInvoice;
+};
+
 class DataService {
 
   /**
@@ -80,10 +245,9 @@ class DataService {
 
         const session = data?.session;
         const user = session?.user;
-        if (!user) throw new Error('No active session');
+      if (!user) throw new TenantError('No active session');
 
-        const tenantId = (user.user_metadata as any)?.tenant_id || (user.app_metadata as any)?.tenant_id;
-        if (!tenantId) throw new Error('Missing tenant_id');
+        const tenantId = (user.user_metadata as any)?.tenant_id || (user.app_metadata as any)?.tenant_id || user.id;
 
         return { userId: user.id, tenantId, user };
   }
@@ -106,6 +270,7 @@ class DataService {
             id: row.id,
             name: `${row.first_name} ${row.last_name}`.trim(),
             role: row.position,
+            systemRole: row.system_role,
             department: row.department,
             status: row.status,
             joinDate: row.join_date,
@@ -114,11 +279,17 @@ class DataService {
             transportAllowance: latestSalary?.transport_allowance || 0,
             otherAllowances: latestSalary?.other_allowances || 0,
             annualLeaveBalance: 21,
-            nationality: '',
+            nationality: row.nationality || '',
             nationalId: row.national_id,
             email: row.email,
             phone: row.phone,
-            iban: row.iban
+            iban: row.iban,
+            contractDurationDays: row.contract_duration_days,
+            iqamaExpiry: row.iqama_expiry,
+            passportExpiry: row.passport_expiry,
+            adminNotes: row.admin_notes,
+            avatarUrl: row.avatar_url,
+            disabled: row.disabled
         };
     });
   }
@@ -141,7 +312,15 @@ class DataService {
         status: emp.status,
         iban: emp.iban,
         national_id: emp.nationalId,
-        contract_type: emp.contractType
+        contract_type: emp.contractType,
+        system_role: emp.systemRole,
+        contract_duration_days: emp.contractDurationDays,
+        iqama_expiry: emp.iqamaExpiry,
+        passport_expiry: emp.passportExpiry,
+        nationality: emp.nationality,
+        admin_notes: emp.adminNotes,
+        avatar_url: emp.avatarUrl,
+        disabled: emp.disabled
     };
 
     const salaryPayload = {
@@ -166,6 +345,7 @@ class DataService {
     // but ideally should also be RPCs if complex. Keeping simple for now as per prompt focus on "Writes" (Inserts usually).
     // However, we must enforce tenant_id check implicitly via RLS.
     
+    const { tenantId } = await this._getContext();
     const dbUpdates: any = {};
     if (emp.name) {
         const parts = emp.name.split(' ');
@@ -176,19 +356,50 @@ class DataService {
     if (emp.phone) dbUpdates.phone = emp.phone;
     if (emp.role) dbUpdates.position = emp.role;
     if (emp.department) dbUpdates.department = emp.department;
-    if (emp.basicSalary) dbUpdates.salary = emp.basicSalary;
+    if (emp.basicSalary !== undefined) dbUpdates.salary = emp.basicSalary;
     if (emp.joinDate) dbUpdates.join_date = emp.joinDate;
     if (emp.status) dbUpdates.status = emp.status;
     if (emp.iban) dbUpdates.iban = emp.iban;
     if (emp.nationalId) dbUpdates.national_id = emp.nationalId;
+    if (emp.nationality !== undefined) dbUpdates.nationality = emp.nationality;
+    if (emp.systemRole) dbUpdates.system_role = emp.systemRole;
+    if (emp.contractDurationDays !== undefined) dbUpdates.contract_duration_days = emp.contractDurationDays;
+    if (emp.iqamaExpiry !== undefined) dbUpdates.iqama_expiry = emp.iqamaExpiry;
+    if (emp.passportExpiry !== undefined) dbUpdates.passport_expiry = emp.passportExpiry;
+    if (emp.adminNotes !== undefined) dbUpdates.admin_notes = emp.adminNotes;
+    if (emp.avatarUrl !== undefined) dbUpdates.avatar_url = emp.avatarUrl;
+    if (emp.disabled !== undefined) dbUpdates.disabled = emp.disabled;
 
     if (Object.keys(dbUpdates).length > 0) {
-        await supabase.from(TBL.EMPLOYEES).update(dbUpdates).eq('id', id);
+        await supabase.from(TBL.EMPLOYEES).update(dbUpdates).eq('id', id).eq('tenant_id', tenantId);
     }
 
     // Salary updates logic remains similar but should ideally be an RPC if we want history tracking
     // For now, we assume direct update is acceptable for simple fields
   }
+
+    async addSalaryStructure(employeeId: string, salary: {
+        basicSalary: number;
+        housingAllowance?: number;
+        transportAllowance?: number;
+        otherAllowances?: number;
+        gosiDeductionPercent?: number;
+        effectiveDate?: string;
+    }): Promise<void> {
+        const { tenantId } = await this._getContext();
+        const payload = {
+                employee_id: employeeId,
+                basic_salary: salary.basicSalary,
+                housing_allowance: salary.housingAllowance ?? 0,
+                transport_allowance: salary.transportAllowance ?? 0,
+                other_allowances: salary.otherAllowances ?? 0,
+                gosi_deduction_percent: salary.gosiDeductionPercent ?? 0,
+                effective_date: salary.effectiveDate || new Date().toISOString(),
+                tenant_id: tenantId
+        };
+
+        await supabase.from('salary_structures').insert(payload);
+    }
 
   async getEmployeeById(id: string): Promise<Employee | undefined> {
     const { tenantId } = await this._getContext();
@@ -213,6 +424,7 @@ class DataService {
         id: emp.id,
         name: `${emp.first_name} ${emp.last_name}`.trim(),
         role: emp.position,
+        systemRole: emp.system_role,
         department: emp.department,
         status: emp.status,
         joinDate: emp.join_date,
@@ -221,11 +433,17 @@ class DataService {
         transportAllowance: salary?.transport_allowance || 0,
         otherAllowances: salary?.other_allowances || 0,
         annualLeaveBalance: 21,
-        nationality: '',
+        nationality: emp.nationality || '',
         nationalId: emp.national_id,
         email: emp.email,
         phone: emp.phone,
-        iban: emp.iban
+        iban: emp.iban,
+        contractDurationDays: emp.contract_duration_days,
+        iqamaExpiry: emp.iqama_expiry,
+        passportExpiry: emp.passport_expiry,
+        adminNotes: emp.admin_notes,
+        avatarUrl: emp.avatar_url,
+        disabled: emp.disabled
     };
   }
 
@@ -276,6 +494,7 @@ class DataService {
 
   async updateProduct(id: string, updates: Partial<Product>): Promise<void> {
     // Simplified update
+    const { tenantId } = await this._getContext();
     const { sizes, ...prodData } = updates;
     const dbUpdates: any = {};
     // ... mapping logic ...
@@ -283,13 +502,14 @@ class DataService {
     // ... (omitted for brevity, same as before) ...
     
     if (Object.keys(dbUpdates).length > 0) {
-        await supabase.from(TBL.PRODUCTS).update(dbUpdates).eq('id', id);
+        await supabase.from(TBL.PRODUCTS).update(dbUpdates).eq('id', id).eq('tenant_id', tenantId);
     }
     // Size updates would require a separate RPC or logic
   }
 
   async deleteProduct(id: string): Promise<void> {
-    await supabase.from(TBL.PRODUCTS).delete().eq('id', id);
+    const { tenantId } = await this._getContext();
+    await supabase.from(TBL.PRODUCTS).delete().eq('id', id).eq('tenant_id', tenantId);
   }
 
   async getProductById(id: string): Promise<Product | undefined> {
@@ -311,21 +531,23 @@ class DataService {
     // Since dbCore is a wrapper, we might need to modify it or use raw query here for strict tenant enforcement
     let query = supabase
       .from(TBL.CONTRACTS)
-      .select('*')
+      .select(`*, items:${TBL.CONTRACT_ITEMS}(*), milestones:${TBL.CONTRACT_MILESTONES}(*)`)
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
       .limit(pageSize);
 
     if (lastId) query = query.lt('id', lastId);
     
-    const { data, error } = await query;
-    if (error) throw error;
+        const { data, error } = await query;
+        if (error) throw error;
 
-    return {
-      items: data as Contract[],
-      hasMore: data.length === pageSize,
-      lastId: data.length > 0 ? data[data.length - 1].id : undefined
-    };
+        const rows: any[] = Array.isArray(data) ? data : [];
+
+        return {
+            items: rows.map(mapContractRow),
+            hasMore: rows.length === pageSize,
+            lastId: rows.length > 0 ? rows[rows.length - 1].id : undefined
+        };
   }
 
   async addContract(contract: Contract): Promise<Contract> {
@@ -379,17 +601,19 @@ class DataService {
   }
 
   async updateContractStatus(id: string, status: ContractStatus): Promise<void> {
-    await supabase.from(TBL.CONTRACTS).update({ status }).eq('id', id);
+    const { tenantId } = await this._getContext();
+    await supabase.from(TBL.CONTRACTS).update({ status }).eq('id', id).eq('tenant_id', tenantId);
     if (status === ContractStatus.IN_PRODUCTION) {
         await this.ensureProjectExists(id);
     }
   }
 
   async markContractSignedByClient(id: string, signatureData: string): Promise<void> {
+    const { tenantId } = await this._getContext();
     await supabase.from(TBL.CONTRACTS).update({ 
-        clientSignature: signatureData, 
+        client_signature: signatureData, 
         status: ContractStatus.SIGNED_CLIENT 
-    }).eq('id', id);
+    }).eq('id', id).eq('tenant_id', tenantId);
     
     // Create Approval via RPC or direct insert (Approvals are simple)
     // ...
@@ -420,8 +644,10 @@ class DataService {
   }
 
   private async getContractById(id: string): Promise<Contract | null> {
-      const { data } = await supabase.from(TBL.CONTRACTS).select('*').eq('id', id).single();
-      return data as Contract;
+      const { tenantId } = await this._getContext();
+      const { data } = await supabase.from(TBL.CONTRACTS)
+        .select(`*, items:${TBL.CONTRACT_ITEMS}(*), milestones:${TBL.CONTRACT_MILESTONES}(*)`).eq('id', id).eq('tenant_id', tenantId).single();
+      return data ? mapContractRow(data) : null;
   }
 
   // --- PROJECTS ---
@@ -432,7 +658,7 @@ class DataService {
         .select(`*, stages:${TBL.PROJECT_STAGES}(*)`)
         .eq('tenant_id', tenantId);
     
-    return (data || []) as any as Project[];
+    return (data || []).map(mapProjectRow);
   }
 
   private async ensureProjectExists(contractId: string) {
@@ -441,7 +667,8 @@ class DataService {
   }
 
   async updateStageStatus(projectId: string, stageId: string, status: ProjectStageStatus): Promise<void> {
-      await supabase.from(TBL.PROJECT_STAGES).update({ status }).eq('id', stageId);
+      const { tenantId } = await this._getContext();
+      await supabase.from(TBL.PROJECT_STAGES).update({ status }).eq('id', stageId).eq('tenant_id', tenantId);
       // ... progress calculation logic ...
   }
 
@@ -468,7 +695,7 @@ class DataService {
   }
 
   async updateInventory(stockId: string, quantity: number, type: InventoryTransactionType): Promise<void> {
-    const { userId } = await this._getContext();
+        const { userId, tenantId } = await this._getContext();
     
     // We need product_id and warehouse_id. 
     // The RPC takes product_id and warehouse_id. 
@@ -487,7 +714,8 @@ class DataService {
         p_warehouse_id: stock.warehouse_id,
         p_type: moveType,
         p_quantity: type === 'IN' ? quantity : -quantity,
-        p_user_id: userId
+        p_user_id: userId,
+        p_tenant_id: tenantId
     });
     
     if (error) throw error;
@@ -503,18 +731,20 @@ class DataService {
         .order('created_at', { ascending: false });
     
     if (error) throw error;
-    return data as any as Quotation[];
+    return (data || []).map(mapQuotationRow);
   }
 
   async getQuotationById(id: string): Promise<Quotation | null> {
+    const { tenantId } = await this._getContext();
     const { data, error } = await supabase
         .from(TBL.QUOTATIONS)
         .select(`*, items:${TBL.QUOTATION_ITEMS}(*)`)
         .eq('id', id)
+        .eq('tenant_id', tenantId)
         .single();
     
     if (error) return null;
-    return data as any as Quotation;
+    return data ? mapQuotationRow(data) : null;
   }
 
   async addQuotation(quotation: Quotation): Promise<void> {
@@ -608,7 +838,10 @@ class DataService {
               createdBy: undefined,
               contractId: (row as any).contract_id,
               projectId: (row as any).project_id,
-              supplierId: (row as any).supplier_id
+              supplierId: (row as any).supplier_id,
+              supplierName: (row as any).supplier?.name || undefined,
+              contractTitle: (row as any).contract?.title || undefined,
+              projectName: (row as any).project?.name || undefined
           } as Disbursement));
           return {
               items,
@@ -633,6 +866,9 @@ class DataService {
           status: 'PENDING',
           approved_by: null,
           attachment_url: disbursement.attachmentUrl || null,
+          supplier_id: disbursement.supplierId || null,
+          contract_id: disbursement.contractId || null,
+          project_id: disbursement.projectId || null,
           tenant_id: tenantId
       } as any;
 
@@ -665,21 +901,22 @@ class DataService {
 
   async getApprovalRequests(): Promise<ApprovalRequest[]> {
       try {
-          const rows = await approvalsRepository.list();
+          const { tenantId } = await this._getContext();
+          const rows = await approvalsRepository.list(tenantId);
           return (rows || []).map((row) => {
               const payload = (row.payload as any) || {};
               return {
                   id: row.id,
-                  type: (payload.type as ApprovalType) || (row.target_type as ApprovalType) || ApprovalType.PAYMENT,
-                  title: payload.title || payload.subject || row.target_type || 'Request',
-                  description: payload.description || row.decision_note || '',
+                  type: (payload.type as ApprovalType) || (row.type as ApprovalType) || (row.target_type as ApprovalType) || ApprovalType.PAYMENT,
+                  title: payload.title || row.title || payload.subject || row.target_type || 'Request',
+                  description: payload.description || row.description || row.decision_note || '',
                   requesterId: row.requester_id || '',
                   requesterName: row.requester_name || payload.requesterName || '',
                   date: row.created_at,
                   status: (row.status as any) || 'PENDING',
-                  relatedEntityId: row.target_id || payload.relatedEntityId,
-                  amount: payload.amount,
-                  priority: (payload.priority as any) || 'MEDIUM',
+                  relatedEntityId: row.target_id || row.related_entity_id || payload.relatedEntityId,
+                  amount: payload.amount ?? row.amount ?? undefined,
+                  priority: (payload.priority as any) || (row.priority as any) || 'MEDIUM',
                   approverId: row.decision_by || undefined,
                   approvedAt: row.decision_at || undefined,
                   targetType: row.target_type || undefined,
@@ -697,18 +934,26 @@ class DataService {
   }
 
   async createApprovalRequest(req: ApprovalRequest): Promise<void> {
-      const { userId, user } = await this._getContext();
+      const { userId, user, tenantId } = await this._getContext();
       const requesterName = req.requesterName || (user?.user_metadata as any)?.full_name || user?.email || 'System';
+      const requesterId = userId || null; // FK requires auth.users id; avoid passing non-auth IDs like employee_id
 
       const payload = {
-          requester_id: req.requesterId || userId,
+          type: req.type,
+          title: req.title,
+          description: req.description,
+          requester_id: requesterId,
           requester_name: requesterName,
           target_type: req.type,
           target_id: req.relatedEntityId || null,
           status: req.status || 'PENDING',
+          related_entity_id: req.relatedEntityId || null,
+          amount: req.amount || null,
+          priority: req.priority || 'MEDIUM',
           decision_by: null,
           decision_at: null,
           decision_note: null,
+          tenant_id: tenantId,
           payload: {
               title: req.title,
               description: req.description,
@@ -716,15 +961,16 @@ class DataService {
               priority: req.priority,
               type: req.type,
               relatedEntityId: req.relatedEntityId,
-              requesterName
+              requesterName,
+              requesterId: req.requesterId || null
           }
       };
 
-      await approvalsRepository.insert(payload);
+      await approvalsRepository.insert(payload, tenantId);
   }
 
   async processApproval(id: string, action: 'APPROVE' | 'REJECT'): Promise<void> {
-      const { userId } = await this._getContext();
+      const { userId, tenantId } = await this._getContext();
       const status = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
 
       await approvalsRepository.update(id, {
@@ -732,10 +978,10 @@ class DataService {
           decision_by: userId,
           decision_at: new Date().toISOString(),
           decision_note: action
-      });
+      }, tenantId);
       
       if (action === 'APPROVE') {
-          const req = await approvalsRepository.getById(id);
+          const req = await approvalsRepository.getById(id, tenantId);
           if (req) {
               const payload = (req.payload as any) || {};
               const targetId = req.target_id || payload.relatedEntityId;
@@ -751,9 +997,7 @@ class DataService {
 
   // --- ACCOUNTING ---
   async getLedgerEntries(): Promise<dbCore.PaginatedResult<JournalEntry>> {
-      const { tenantId } = await this._getContext();
-      const { data } = await supabase.from(TBL.JOURNALS).select('*').eq('tenant_id', tenantId).order('date', { ascending: false }).limit(50);
-      const items = data as JournalEntry[];
+      const items = await accountingService.getJournalEntries();
       return { 
           items, 
           hasMore: false,
@@ -808,51 +1052,27 @@ class DataService {
     const { data, error } = await query;
     if (error) throw error;
     
-    const items = data.map((row: any) => ({
-        id: row.id,
-        invoiceNumber: row.invoice_number,
-        issueDate: row.issue_date,
-        dueDate: row.due_date,
-        status: row.status,
-        type: row.type,
-        subtotal: row.subtotal,
-        vatAmount: row.vat_amount,
-        totalAmount: row.total_amount,
-        currency: 'SAR',
-        createdBy: row.created_by || 'system',
-        buyer: {
-            name: row.customer?.name || 'Unknown',
-            vatNumber: row.customer?.vat_number,
-            address: row.customer?.address,
-            legalName: row.customer?.company_name
-        },
-        seller: { 
-            legalName: 'Black Swan Co.',
-            vatNumber: '300000000000003',
-            address: 'Riyadh, SA',
-            country: 'SA',
-            crNumber: '1010000000',
-            logoUrl: ''
-        },
-        items: [] 
-    }));
+    const rows = data || [];
+    const items = rows.map((row: any) => mapTaxInvoiceRow(row));
     
     return { 
         items: items as TaxInvoice[], 
-        hasMore: data.length === pageSize, 
+        hasMore: rows.length === pageSize, 
         lastId: items.length > 0 ? items[items.length - 1].id : undefined 
     };
   }
 
   async getTaxInvoiceById(id: string): Promise<TaxInvoice | null> {
+      const { tenantId } = await this._getContext();
       const { data, error } = await supabase
         .from(TBL.INVOICES)
-        .select(`*, items:${TBL.INVOICE_ITEMS}(*)`)
+        .select(`*, items:${TBL.INVOICE_ITEMS}(*), customer:customers(*)`)
         .eq('id', id)
+        .eq('tenant_id', tenantId)
         .single();
       
       if (error) return null;
-      return data as any as TaxInvoice;
+      return data ? mapTaxInvoiceRow(data) : null;
   }
 
   async createTaxInvoice(invoiceInput: Partial<TaxInvoice> & { customerId?: string }): Promise<TaxInvoice> {
@@ -890,11 +1110,13 @@ class DataService {
   }
 
   async approveInvoice(id: string): Promise<void> {
-      await supabase.from(TBL.INVOICES).update({ status: InvoiceStatus.APPROVED }).eq('id', id);
+      const { tenantId } = await this._getContext();
+      await supabase.from(TBL.INVOICES).update({ status: InvoiceStatus.APPROVED }).eq('id', id).eq('tenant_id', tenantId);
   }
 
   async postInvoice(id: string): Promise<void> {
-      await supabase.from(TBL.INVOICES).update({ status: InvoiceStatus.POSTED }).eq('id', id);
+      const { tenantId } = await this._getContext();
+      await supabase.from(TBL.INVOICES).update({ status: InvoiceStatus.POSTED }).eq('id', id).eq('tenant_id', tenantId);
       // Trigger accounting post via RPC or service
   }
 
@@ -920,7 +1142,8 @@ class DataService {
   }
 
   async getCustomerById(id: string): Promise<Customer|undefined> {
-      const { data, error } = await supabase.from(TBL.CUSTOMERS).select('*').eq('id', id).single();
+      const { tenantId } = await this._getContext();
+      const { data, error } = await supabase.from(TBL.CUSTOMERS).select('*').eq('id', id).eq('tenant_id', tenantId).single();
       if (error) return undefined;
       return {
           id: data.id,
@@ -950,6 +1173,7 @@ class DataService {
   }
 
   async updateCustomer(id: string, c: Partial<Customer>): Promise<void> {
+      const { tenantId } = await this._getContext();
       const dbUpdates: any = {};
       if (c.name !== undefined) dbUpdates.name = c.name;
       if (c.company !== undefined) dbUpdates.company_name = c.company;
@@ -960,11 +1184,14 @@ class DataService {
       if (c.notes !== undefined) dbUpdates.notes = c.notes;
       
       if (Object.keys(dbUpdates).length > 0) {
-          await supabase.from(TBL.CUSTOMERS).update(dbUpdates).eq('id', id);
+          await supabase.from(TBL.CUSTOMERS).update(dbUpdates).eq('id', id).eq('tenant_id', tenantId);
       }
   }
 
-  async deleteCustomer(id: string): Promise<void> { await supabase.from(TBL.CUSTOMERS).delete().eq('id', id); }
+  async deleteCustomer(id: string): Promise<void> {
+      const { tenantId } = await this._getContext();
+      await supabase.from(TBL.CUSTOMERS).delete().eq('id', id).eq('tenant_id', tenantId);
+  }
 
   async getSuppliers(): Promise<Supplier[]> {
       const { tenantId } = await this._getContext();
@@ -984,7 +1211,8 @@ class DataService {
   }
 
   async getSupplierById(id: string): Promise<Supplier|undefined> {
-      const { data, error } = await supabase.from(TBL.SUPPLIERS).select('*').eq('id', id).single();
+      const { tenantId } = await this._getContext();
+      const { data, error } = await supabase.from(TBL.SUPPLIERS).select('*').eq('id', id).eq('tenant_id', tenantId).single();
       if (error) return undefined;
       return {
           id: data.id,
@@ -1017,6 +1245,7 @@ class DataService {
   }
 
   async updateSupplier(id: string, s: Partial<Supplier>): Promise<void> {
+      const { tenantId } = await this._getContext();
       const dbUpdates: any = {};
       if (s.name !== undefined) dbUpdates.name = s.name;
       if (s.contactPerson !== undefined) dbUpdates.contact_person = s.contactPerson;
@@ -1028,11 +1257,14 @@ class DataService {
       if (s.notes !== undefined) dbUpdates.notes = s.notes;
 
       if (Object.keys(dbUpdates).length > 0) {
-          await supabase.from(TBL.SUPPLIERS).update(dbUpdates).eq('id', id);
+          await supabase.from(TBL.SUPPLIERS).update(dbUpdates).eq('id', id).eq('tenant_id', tenantId);
       }
   }
 
-  async deleteSupplier(id: string): Promise<void> { await supabase.from(TBL.SUPPLIERS).delete().eq('id', id); }
+  async deleteSupplier(id: string): Promise<void> {
+      const { tenantId } = await this._getContext();
+      await supabase.from(TBL.SUPPLIERS).delete().eq('id', id).eq('tenant_id', tenantId);
+  }
 
   // --- SETTINGS ---
   async getCompanySettings(): Promise<CompanySettings> {
@@ -1209,46 +1441,194 @@ class DataService {
       }
   }
 
-  async convertQuotationToContract(_quotationId: string): Promise<Contract | null> {
-      return null;
+  async convertQuotationToContract(quotationId: string): Promise<Contract | null> {
+      const { userId, tenantId } = await this._getContext();
+      const q = await this.getQuotationById(quotationId);
+      if (!q) return null;
+
+      const contract: Contract = {
+          id: '',
+          contractNumber: `CN-${Date.now().toString().slice(-6)}`,
+          clientId: q.customerId || '',
+          clientName: q.customerName,
+          title: q.customerCompany ? `Quotation ${q.quotationNumber}` : q.quotationNumber,
+          totalValue: q.totalAmount,
+          status: ContractStatus.DRAFT,
+          startDate: q.date,
+          deliveryDate: q.expiryDate || q.date,
+          items: (q.items || []).map((i) => ({
+              id: '',
+              productName: i.description,
+              quantity: i.quantity,
+              unitPrice: i.unitPrice
+          })),
+          partyA: undefined,
+          partyB: {
+              legalName: q.customerCompany || q.customerName,
+              representativeName: q.customerName,
+              address: q.customerAddress,
+              email: q.customerEmail,
+              phone: q.customerPhone,
+              vatNumber: q.customerVat
+          },
+          paymentTerms: [],
+          currency: 'SAR',
+          payment1Status: PaymentStatus.PENDING,
+          payment2Status: PaymentStatus.PENDING,
+          createdAt: new Date().toISOString(),
+          ownerId: userId,
+          notes: q.notes
+      };
+
+      const saved = await this.addContract(contract);
+      await supabase
+        .from(TBL.QUOTATIONS)
+        .update({ status: 'CONVERTED' })
+        .eq('id', quotationId)
+        .eq('tenant_id', tenantId);
+      return saved;
   }
 
   async getPendingAccessRequests(): Promise<AccessRequest[]> {
-      return [];
+      try {
+          const { tenantId } = await this._getContext();
+          const { data, error } = await supabase
+              .from('profiles')
+              .select('id, email, full_name, status, role, created_at')
+              .eq('tenant_id', tenantId)
+              .eq('status', 'PENDING')
+              .order('created_at', { ascending: false });
+          if (error) throw error;
+          return (data || []).map((row: any) => ({
+              id: row.id,
+              email: row.email,
+              fullName: row.full_name,
+              status: row.status,
+              role: row.role,
+              createdAt: row.created_at
+          })) as AccessRequest[];
+      } catch (err) {
+          console.error('getPendingAccessRequests', err);
+          return [];
+      }
   }
 
   async activateUserProfile(_id: string, _role: Role): Promise<void> {
-      return;
+      const { userId, tenantId } = await this._getContext();
+      await supabase
+        .from('profiles')
+        .update({
+          status: 'ACTIVE',
+          role: _role,
+          approved_by: userId,
+          approved_at: new Date().toISOString()
+        })
+        .eq('id', _id)
+        .eq('tenant_id', tenantId);
   }
 
   async rejectUserProfile(_id: string): Promise<void> {
-      return;
+      const { userId, tenantId } = await this._getContext();
+      await supabase
+        .from('profiles')
+        .update({
+          status: 'REJECTED',
+          approved_by: userId,
+          approved_at: new Date().toISOString()
+        })
+        .eq('id', _id)
+        .eq('tenant_id', tenantId);
   }
 
   async getMyProfile(): Promise<Employee | null> {
       try {
-          const { userId } = await this._getContext();
+          const { userId, user } = await this._getContext();
           const employees = await this.getEmployees();
-          return employees.find(e => e.id === userId) || null;
+          const byId = employees.find(e => e.id === userId);
+          if (byId) return byId;
+          const email = user?.email?.toLowerCase();
+          if (!email) return null;
+          return employees.find(e => (e.email || '').toLowerCase() === email) || null;
       } catch (err) {
           console.error('getMyProfile', err);
           return null;
       }
   }
 
-  async getEmployeeLeaves(_employeeId: string): Promise<LeaveRecord[]> {
-      return [];
+  async getEmployeeLeaves(employeeId: string): Promise<LeaveRecord[]> {
+      try {
+          const { tenantId } = await this._getContext();
+          const { data, error } = await supabase
+            .from('leaves')
+            .select('id, employee_id, type, start_date, end_date, status, reason')
+            .eq('employee_id', employeeId)
+            .eq('tenant_id', tenantId)
+            .order('start_date', { ascending: false });
+          if (error) throw error;
+          return (data || []).map((row: any) => ({
+              id: row.id,
+              employeeId: row.employee_id,
+              type: row.type,
+              startDate: row.start_date,
+              endDate: row.end_date,
+              status: row.status,
+              reason: row.reason || ''
+          })) as LeaveRecord[];
+      } catch (err) {
+          console.error('getEmployeeLeaves', err);
+          return [];
+      }
   }
 
-  async updateMyProfile(_profile: Partial<Employee>): Promise<void> {
-      return;
+  async updateMyProfile(profile: Partial<Employee>): Promise<void> {
+      const { tenantId, userId, user } = await this._getContext();
+      const dbUpdates: any = {};
+      if (profile.phone !== undefined) dbUpdates.phone = profile.phone;
+      if (profile.email !== undefined) dbUpdates.email = profile.email;
+      if (profile.iban !== undefined) dbUpdates.iban = profile.iban;
+      if (profile.avatarUrl !== undefined) dbUpdates.avatar_url = profile.avatarUrl;
+      if (profile.adminNotes !== undefined) dbUpdates.admin_notes = profile.adminNotes;
+
+      if (Object.keys(dbUpdates).length === 0) return;
+
+      const email = user?.email;
+      let query = supabase.from(TBL.EMPLOYEES).update(dbUpdates);
+      if (email) {
+          query = query.eq('email', email);
+      } else {
+          query = query.eq('id', userId);
+      }
+      await query.eq('tenant_id', tenantId);
   }
 
-  async uploadEmployeeFile(_employeeId: string, _file: any): Promise<string> {
-      return '';
+  async uploadEmployeeFile(employeeId: string, file: any): Promise<string> {
+      const { tenantId } = await this._getContext();
+      const safeName = (file?.name || 'file').replace(/\s+/g, '_');
+      const path = `${tenantId}/${employeeId}/${Date.now()}-${safeName}`;
+      const { data, error } = await supabase.storage
+        .from('employee-files')
+        .upload(path, file, { upsert: true });
+      if (error) throw error;
+      const { data: url } = supabase.storage.from('employee-files').getPublicUrl(data.path);
+      return url.publicUrl;
   }
 
   async requestLeaveApproval(payload: any): Promise<void> {
+      const { tenantId } = await this._getContext();
+      const start = payload?.from ? new Date(payload.from) : null;
+      const end = payload?.to ? new Date(payload.to) : null;
+      const duration = payload?.duration ?? (start && end ? Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1) : 1);
+      const { data, error } = await supabase.from('leaves').insert({
+          employee_id: payload?.employeeId,
+          type: payload?.type || payload?.leaveType || 'Annual',
+          start_date: payload?.from,
+          end_date: payload?.to,
+          days: duration,
+          status: 'PENDING',
+          reason: payload?.reason || '',
+          tenant_id: tenantId
+      }).select('id').single();
+      if (error) throw error;
       await this.createApprovalRequest({
           type: ApprovalType.LEAVE,
           title: payload?.title || 'Leave Request',
@@ -1257,14 +1637,37 @@ class DataService {
           requesterName: payload?.employeeName || 'Employee',
           date: new Date().toISOString(),
           status: 'PENDING',
-          relatedEntityId: payload?.id,
+          relatedEntityId: data?.id,
           amount: payload?.duration,
           priority: 'MEDIUM'
       } as any);
   }
 
-  async requestGeneralApproval(payload: ApprovalRequest): Promise<void> {
-      await this.createApprovalRequest(payload);
+  async requestGeneralApproval(payload: Partial<ApprovalRequest>): Promise<void> {
+      const tempId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? (crypto as any).randomUUID() : Math.random().toString(36).slice(2);
+      const request: ApprovalRequest = {
+          id: payload.id || tempId,
+          type: payload.type || ApprovalType.ACCESS,
+          title: payload.title || 'General Approval',
+          description: payload.description || '',
+          requesterId: payload.requesterId || '',
+          requesterName: payload.requesterName || 'System',
+          date: payload.date || new Date().toISOString(),
+          status: payload.status || 'PENDING',
+          relatedEntityId: payload.relatedEntityId,
+          amount: payload.amount,
+          priority: payload.priority || 'MEDIUM',
+          approverId: payload.approverId,
+          approvedAt: payload.approvedAt,
+          targetType: payload.targetType,
+          targetId: payload.targetId,
+          decisionBy: payload.decisionBy,
+          decisionAt: payload.decisionAt,
+          decisionNote: payload.decisionNote,
+          payload: payload.payload
+      };
+
+      await this.createApprovalRequest(request);
   }
 
   async requestContractApproval(contractId: string, title: string, totalValue?: number): Promise<void> {
@@ -1298,27 +1701,93 @@ class DataService {
   }
 
   async getSalaryHistory(_employeeId: string): Promise<any[]> {
-      return [];
+      try {
+          const { tenantId } = await this._getContext();
+          const { data, error } = await supabase
+            .from('salary_structures')
+            .select('*')
+            .eq('employee_id', _employeeId)
+            .eq('tenant_id', tenantId)
+            .order('effective_date', { ascending: false });
+          if (error) throw error;
+          return data || [];
+      } catch (err) {
+          console.error('getSalaryHistory', err);
+          return [];
+      }
   }
 
   async listEmployeeFiles(_employeeId: string): Promise<any[]> {
-      return [];
+      try {
+          const { tenantId } = await this._getContext();
+          const folder = `${tenantId}/${_employeeId}`;
+          const { data, error } = await supabase.storage.from('employee-files').list(folder);
+          if (error) throw error;
+          return (data || []).map((f) => {
+              const path = `${folder}/${f.name}`;
+              const { data: url } = supabase.storage.from('employee-files').getPublicUrl(path);
+              return { name: f.name, path, url: url.publicUrl };
+          });
+      } catch (err) {
+          console.error('listEmployeeFiles', err);
+          return [];
+      }
   }
 
   async getEmployeeAudit(_employeeId: string): Promise<any[]> {
-      return [];
+      try {
+          const { tenantId } = await this._getContext();
+          const { data, error } = await supabase
+            .from('audit_logs')
+            .select('id, table_name, record_id, operation, changed_by, changed_at, new_data, old_data')
+            .eq('record_id', _employeeId)
+            .eq('tenant_id', tenantId)
+            .order('changed_at', { ascending: false });
+          if (error) throw error;
+          return data || [];
+      } catch (err) {
+          console.error('getEmployeeAudit', err);
+          return [];
+      }
   }
 
   async deleteEmployee(_id: string): Promise<void> {
-      return;
+      const { tenantId } = await this._getContext();
+      await supabase
+        .from(TBL.EMPLOYEES)
+        .update({ status: 'Terminated', disabled: true })
+        .eq('id', _id)
+        .eq('tenant_id', tenantId);
   }
 
   async deleteEmployeeFile(_path: string): Promise<void> {
-      return;
+      const { error } = await supabase.storage.from('employee-files').remove([_path]);
+      if (error) throw error;
   }
 
   async signUpAndRequestAccess(_payload: any): Promise<void> {
-      return;
+            const { fullName, email, password, tenantId } = _payload || {};
+      const metadata: Record<string, any> = { full_name: fullName };
+      if (tenantId) metadata.tenant_id = tenantId;
+      const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: metadata }
+      });
+      if (error) throw error;
+      if (data?.session?.user) {
+          await this.createApprovalRequest({
+              type: ApprovalType.ACCESS,
+              title: 'Access Request',
+              description: `Access request for ${email}`,
+              requesterId: data.session.user.id,
+              requesterName: fullName || email,
+              date: new Date().toISOString(),
+              status: 'PENDING',
+              relatedEntityId: data.session.user.id,
+              priority: 'MEDIUM'
+          } as any);
+      }
   }
 
   async getRoles(): Promise<Role[]> {
@@ -1326,20 +1795,175 @@ class DataService {
   }
 
   async addLedgerEntry(e: any): Promise<void> {
-      throw new Error('addLedgerEntry is not implemented.');
+      await this.createJournalEntry(e);
   }
 
   async processOrder(c: any, t: any): Promise<void> {
-      throw new Error('processOrder is not implemented.');
+      const { tenantId, userId } = await this._getContext();
+      const orderNumber = `ORD-${Date.now().toString().slice(-6)}`;
+      const subtotal = (c || []).reduce((sum: number, item: any) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0);
+      const vatAmount = subtotal * 0.15;
+      const totalAmount = subtotal + vatAmount;
+
+      const { data: order, error } = await supabase
+        .from(TBL.ORDERS)
+        .insert({
+          order_number: orderNumber,
+          type: t,
+          customer_type: t === 'B2B' ? 'Business' : 'Consumer',
+          subtotal,
+          vat_amount: vatAmount,
+          total_amount: totalAmount,
+          status: 'PENDING',
+          created_by: userId,
+          tenant_id: tenantId
+        })
+        .select('id')
+        .single();
+      if (error) throw error;
+
+      const itemsPayload = (c || []).map((item: any) => ({
+        order_id: order.id,
+        product_id: item.id,
+        product_name: item.name,
+        sku: item.sku,
+        quantity: item.quantity,
+        unit_price: item.price,
+        line_total: Number(item.price || 0) * Number(item.quantity || 0),
+        tenant_id: tenantId
+      }));
+      if (itemsPayload.length > 0) {
+        const { error: itemsError } = await supabase.from(TBL.ORDER_ITEMS).insert(itemsPayload);
+        if (itemsError) throw itemsError;
+      }
   }
 
   async generateDeliveryNote(id: string): Promise<DeliveryNote | null> { 
-      return null; 
+      try {
+          const { tenantId } = await this._getContext();
+          const { data: contract, error } = await supabase
+            .from(TBL.CONTRACTS)
+            .select('id, contract_number, title, party_b')
+            .eq('id', id)
+            .eq('tenant_id', tenantId)
+            .single();
+          if (error || !contract) return null;
+
+          const { data: items } = await supabase
+            .from(TBL.CONTRACT_ITEMS)
+            .select('product_name, quantity')
+            .eq('contract_id', id)
+            .eq('tenant_id', tenantId);
+
+          const partyB = (contract as any).party_b || {};
+          return {
+            id: `DN-${Date.now().toString().slice(-6)}`,
+            contractId: contract.id,
+            contractNumber: contract.contract_number,
+            clientName: partyB.legalName || partyB.representativeName || '',
+            deliveryDate: new Date().toISOString(),
+            items: (items || []).map((i: any) => ({
+              productName: i.product_name || '',
+              quantity: Number(i.quantity || 0)
+            }))
+          } as DeliveryNote;
+      } catch (err) {
+          console.error('generateDeliveryNote', err);
+          return null;
+      }
   }
 
   async getBreakEvenAnalysis() { 
       return { fixedCosts: 0, variableCosts: 0, revenue: 0, breakEvenRevenue: 0, netProfit: 0 }; 
   }
+
+    async getDashboardData() {
+            const { tenantId } = await this._getContext();
+
+            const [receiptsRes, disbRes, invoiceRes, approvals, contractsRes] = await Promise.all([
+                    supabase
+                        .from(TBL.RECEIPTS)
+                        .select('id, amount, date, customer_name')
+                        .eq('tenant_id', tenantId)
+                        .order('date', { ascending: false })
+                        .limit(60),
+                    supabase
+                        .from(TBL.DISBURSEMENTS)
+                        .select('id, amount, date, category, status')
+                        .eq('tenant_id', tenantId)
+                        .order('date', { ascending: false })
+                        .limit(60),
+                    supabase
+                        .from(TBL.INVOICES)
+                        .select('id, invoice_number, total_amount, issue_date, status, customer_name')
+                        .eq('tenant_id', tenantId)
+                        .order('issue_date', { ascending: false })
+                        .limit(60),
+                    approvalsRepository.list(tenantId),
+                    supabase
+                        .from(TBL.CONTRACTS)
+                        .select('id')
+                        .eq('tenant_id', tenantId)
+            ]);
+
+            const receipts = receiptsRes.data || [];
+            const disbursements = disbRes.data || [];
+            const invoices = invoiceRes.data || [];
+            const contracts = contractsRes.data || [];
+
+            const totalReceipts = receipts.reduce((sum: number, r: any) => sum + Number(r.amount || 0), 0);
+            const totalDisbursements = disbursements.reduce((sum: number, d: any) => sum + Number(d.amount || 0), 0);
+
+            const groupByMonth = (rows: any[]) => {
+                    const map: Record<string, { inflow: number; outflow: number }> = {};
+                    rows.forEach((r) => {
+                            const key = (r.date || '').slice(0, 7) || 'غير محدد';
+                            if (!map[key]) map[key] = { inflow: 0, outflow: 0 };
+                            map[key].inflow += Number(r.amount || 0);
+                    });
+                    disbursements.forEach((d: any) => {
+                            const key = (d.date || '').slice(0, 7) || 'غير محدد';
+                            if (!map[key]) map[key] = { inflow: 0, outflow: 0 };
+                            map[key].outflow += Number(d.amount || 0);
+                    });
+                    return Object.entries(map)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([month, vals]) => ({ month, inflow: vals.inflow, outflow: vals.outflow }));
+            };
+
+            const invoicesByStatus = invoices.reduce((acc: Record<string, number>, inv: any) => {
+                    const status = inv.status || 'UNKNOWN';
+                    acc[status] = (acc[status] || 0) + 1;
+                    return acc;
+            }, {} as Record<string, number>);
+
+            return {
+                    totals: {
+                            receipts: totalReceipts,
+                            disbursements: totalDisbursements,
+                            netCash: totalReceipts - totalDisbursements,
+                            contracts: contracts.length,
+                            invoices: invoices.length,
+                            pendingApprovals: approvals.filter((a) => (a.status as any) === 'PENDING').length
+                    },
+                    charts: {
+                            cashFlow: groupByMonth(receipts),
+                            invoicesByStatus
+                    },
+                    recent: {
+                            receipts: receipts.slice(0, 5),
+                            disbursements: disbursements.slice(0, 5),
+                            approvals: approvals.slice(0, 5)
+                    }
+            };
+    }
 }
 
 export const dataService = new DataService();
+
+
+
+
+
+
+

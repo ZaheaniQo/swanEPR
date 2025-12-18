@@ -1,10 +1,10 @@
-
+﻿
 import { supabase } from '../supabaseClient';
 
 const getContext = async () => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthorized');
-  const tenantId = user.app_metadata?.tenant_id || user.id;
+  const tenantId = user.user_metadata?.tenant_id || user.app_metadata?.tenant_id || user.id;
   return { tenantId };
 };
 
@@ -122,3 +122,4 @@ export const getOne = async <T>(table: string, id: string): Promise<T | undefine
   if (error) return undefined;
   return data as T;
 };
+

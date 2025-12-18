@@ -1,4 +1,4 @@
-
+﻿
 import { supabase } from '../supabaseClient';
 import { Account, AccountType, JournalEntry, JournalStatus, TaxInvoice, WorkOrder, Disbursement } from '../../types';
 import { getList, create, getOne } from './core';
@@ -10,7 +10,7 @@ const TBL_JOURNAL_LINES = 'journal_lines';
 async function getContext() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthorized');
-  const tenantId = user.app_metadata?.tenant_id || user.id;
+  const tenantId = user.user_metadata?.tenant_id || user.app_metadata?.tenant_id || user.id;
   return { userId: user.id, tenantId };
 }
 
@@ -369,3 +369,4 @@ export const accountingService = {
     };
   }
 };
+

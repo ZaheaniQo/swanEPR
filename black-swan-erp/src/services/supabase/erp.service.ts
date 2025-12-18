@@ -1,4 +1,4 @@
-
+﻿
 import { 
   CostCenter, Warehouse, InventoryStock, LandedCost, 
   AssetCategory, Asset, AssetDepreciationSchedule, 
@@ -29,7 +29,7 @@ const TBL = {
 const getContext = async () => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthorized');
-  const tenantId = (user as any).app_metadata?.tenant_id || user.id;
+  const tenantId = (user as any).user_metadata?.tenant_id || (user as any).app_metadata?.tenant_id || user.id;
   return { tenantId, userId: user.id };
 };
 
@@ -287,9 +287,9 @@ export const erpService = {
           
             if (totalValue > 0) {
              await accountingService.postWorkOrderCompletion({
-               ...wo,
+               ...(wo as any),
                productName: productInfo?.name
-             }, totalValue);
+             } as any, totalValue);
             }
       }
       return wo;
@@ -452,3 +452,4 @@ export const erpService = {
     }
   }
 };
+

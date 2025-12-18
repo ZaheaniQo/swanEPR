@@ -171,7 +171,7 @@ create table public.coa_accounts (
   name text,
   type text,
   description text,
-  isSystem boolean,
+  is_system boolean,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -638,9 +638,15 @@ export const FEATURE_ROLES: Record<string, Role[]> = {
   accounting_view: [Role.CEO, Role.ACCOUNTING, Role.PARTNER],
   accounting_write: [Role.CEO, Role.ACCOUNTING],
   assets: [Role.CEO, Role.ACCOUNTING],
+  assets_view: [Role.CEO, Role.ACCOUNTING],
+  assets_write: [Role.CEO, Role.ACCOUNTING],
   hr: [Role.CEO, Role.HR],
+  hr_view: [Role.CEO, Role.HR],
+  hr_write: [Role.CEO, Role.HR],
   payroll: [Role.CEO, Role.HR, Role.ACCOUNTING],
+  payroll_view: [Role.CEO, Role.HR, Role.ACCOUNTING],
   partners: [Role.CEO, Role.PARTNER],
+  partners_view: [Role.CEO, Role.PARTNER],
   settings: [Role.CEO, Role.ACCOUNTING]
 };
 

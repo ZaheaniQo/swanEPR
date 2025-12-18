@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation, useApp } from '../AppContext';
 import { dataService } from '../services/dataService';
 import { 
@@ -32,6 +32,27 @@ const Contracts: React.FC = () => {
         const [searchTerm, setSearchTerm] = useState('');
         const [statusFilter, setStatusFilter] = useState<'ALL' | ContractStatus>('ALL');
         const [customerFilter, setCustomerFilter] = useState<string>('');
+
+  const stats = useMemo(() => {
+      const totalValue = contracts.reduce((sum, c) => sum + (c.totalValue || 0), 0);
+      const signed = contracts.filter(c => c.status === ContractStatus.SIGNED_CLIENT).length;
+      const awaiting = contracts.filter(c => c.status === ContractStatus.AWAITING_SIGNATURE).length;
+      const inProduction = contracts.filter(c => c.status === ContractStatus.IN_PRODUCTION).length;
+      return { total: contracts.length, totalValue, signed, awaiting, inProduction };
+  }, [contracts]);
+
+  const filteredContracts = useMemo(() => {
+      return contracts.filter(c => {
+          const matchesSearch = searchTerm ? (
+              (c.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+              (c.clientName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+              (c.contractNumber || '').toLowerCase().includes(searchTerm.toLowerCase())
+          ) : true;
+          const matchesStatus = statusFilter === 'ALL' ? true : c.status === statusFilter;
+          const matchesCustomer = customerFilter ? c.clientName === customerFilter || c.clientId === customerFilter : true;
+          return matchesSearch && matchesStatus && matchesCustomer;
+      });
+  }, [contracts, searchTerm, statusFilter, customerFilter]);
   
   // Builder Mode State
   const [isBuilderMode, setIsBuilderMode] = useState(false);
@@ -510,36 +531,28 @@ const Contracts: React.FC = () => {
 
   const renderList = () => (
         <div className="space-y-6">
-            {(() => {
-                const totalValue = contracts.reduce((sum, c) => sum + (c.totalValue || 0), 0);
-                const signed = contracts.filter(c => c.status === ContractStatus.SIGNED_CLIENT).length;
-                const awaiting = contracts.filter(c => c.status === ContractStatus.AWAITING_SIGNATURE).length;
-                const inProduction = contracts.filter(c => c.status === ContractStatus.IN_PRODUCTION).length;
-                return (
-                    <div className="grid card-grid cols-2 lg:grid-cols-4">
-                        <div className="glass rounded-2xl p-4">
-                            <p className="eyebrow">{t('col.total')}</p>
-                            <div className="text-2xl font-bold">{contracts.length}</div>
-                            <p className="muted text-xs mt-1">{t('contracts.title')}</p>
-                        </div>
-                        <div className="glass rounded-2xl p-4">
-                            <p className="eyebrow">{t('col.amount')}</p>
-                            <div className="text-2xl font-bold">{totalValue.toLocaleString()} SAR</div>
-                            <p className="muted text-xs mt-1">{t('kpi.contracts')}</p>
-                        </div>
-                        <div className="glass rounded-2xl p-4">
-                            <p className="eyebrow">{t('status')}</p>
-                            <div className="text-2xl font-bold text-emerald-600">{signed}</div>
-                            <p className="muted text-xs mt-1">Signed</p>
-                        </div>
-                        <div className="glass rounded-2xl p-4">
-                            <p className="eyebrow">Pipeline</p>
-                            <div className="text-2xl font-bold text-amber-600">{awaiting || inProduction}</div>
-                            <p className="muted text-xs mt-1">Awaiting / Production</p>
-                        </div>
-                    </div>
-                );
-            })()}
+            <div className="grid card-grid cols-2 lg:grid-cols-4">
+                <div className="glass rounded-2xl p-4">
+                    <p className="eyebrow">{t('col.total')}</p>
+                    <div className="text-2xl font-bold">{stats.total}</div>
+                    <p className="muted text-xs mt-1">{t('contracts.title')}</p>
+                </div>
+                <div className="glass rounded-2xl p-4">
+                    <p className="eyebrow">{t('col.amount')}</p>
+                    <div className="text-2xl font-bold">{stats.totalValue.toLocaleString()} SAR</div>
+                    <p className="muted text-xs mt-1">{t('kpi.contracts')}</p>
+                </div>
+                <div className="glass rounded-2xl p-4">
+                    <p className="eyebrow">{t('status')}</p>
+                    <div className="text-2xl font-bold text-emerald-600">{stats.signed}</div>
+                    <p className="muted text-xs mt-1">Signed</p>
+                </div>
+                <div className="glass rounded-2xl p-4">
+                    <p className="eyebrow">Pipeline</p>
+                    <div className="text-2xl font-bold text-amber-600">{stats.awaiting + stats.inProduction}</div>
+                    <p className="muted text-xs mt-1">Awaiting / Production</p>
+                </div>
+            </div>
 
             <div className="glass rounded-2xl p-4 flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
                 <div className="flex flex-wrap items-center gap-3">
@@ -578,18 +591,7 @@ const Contracts: React.FC = () => {
             </div>
 
             {(() => {
-                const filtered = contracts.filter(c => {
-                    const matchesSearch = searchTerm ? (
-                        (c.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        (c.clientName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        (c.contractNumber || '').toLowerCase().includes(searchTerm.toLowerCase())
-                    ) : true;
-                    const matchesStatus = statusFilter === 'ALL' ? true : c.status === statusFilter;
-                    const matchesCustomer = customerFilter ? c.clientName === customerFilter || c.clientId === customerFilter : true;
-                    return matchesSearch && matchesStatus && matchesCustomer;
-                });
-
-                if (filtered.length === 0) {
+                if (filteredContracts.length === 0) {
                     return (
                         <div className="glass rounded-2xl p-10 text-center space-y-3">
                             <div className="text-3xl">📝</div>
@@ -604,7 +606,7 @@ const Contracts: React.FC = () => {
 
                 return (
                     <div className="grid grid-cols-1 gap-6">
-                        {filtered.map((contract) => {
+                        {filteredContracts.map((contract) => {
                             const contractExpenses = disbursements.filter(d => d.contractId === contract.id);
                             const totalExpenses = contractExpenses.reduce((sum, d) => sum + d.amount, 0);
 

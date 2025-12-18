@@ -22,7 +22,7 @@ export const useRoles = () => {
       try {
         const data = await dataService.getRoles();
         if (!isMounted) return;
-        setRoles(data.map(r => ({ id: r.id, name: r.name as Role | string, description: r.description })));
+        setRoles((data || []).map((r: any) => ({ id: r.id, name: r.name as Role | string, description: r.description })));
       } catch (err: any) {
         if (!isMounted) return;
         setError(err?.message || 'Failed to load roles');

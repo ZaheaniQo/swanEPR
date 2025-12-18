@@ -120,13 +120,15 @@ export const complianceService = {
     entityId: string, 
     details: any
   ) {
+    const { tenantId } = await getContext();
     const payload = {
       table_name: entityType,
       record_id: entityId,
       operation: action,
       new_data: { ...details, userName },
       changed_by: userId,
-      changed_at: new Date().toISOString()
+      changed_at: new Date().toISOString(),
+      tenant_id: tenantId
     } as const;
 
     const { error } = await supabase.from(TBL_AUDIT).insert(payload);
@@ -134,6 +136,7 @@ export const complianceService = {
   },
 
   async getAuditLogs(entityId?: string) {
+      const { tenantId } = await getContext();
       let query = supabase
         .from(TBL_AUDIT)
         .select('id, table_name, record_id, operation, changed_by, changed_at, new_data, old_data')
@@ -142,6 +145,7 @@ export const complianceService = {
       if (entityId) {
         query = query.eq('record_id', entityId);
       }
+      query = query.eq('tenant_id', tenantId);
       
       const { data, error } = await query;
       if (error) throw error;

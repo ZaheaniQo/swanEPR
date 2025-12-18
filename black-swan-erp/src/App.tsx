@@ -213,7 +213,11 @@ const AppContent: React.FC = () => {
               <InvoiceForm />
             </ProtectedRoute>
           } />
-          <Route path="invoices/:id" element={<InvoiceDetails />} />
+          <Route path="invoices/:id" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.invoices_view}>
+              <InvoiceDetails />
+            </ProtectedRoute>
+          } />
 
           <Route path="disbursements" element={
             <ProtectedRoute allowedRoles={FEATURE_ROLES.disbursements_view}>
@@ -271,11 +275,6 @@ const AppContent: React.FC = () => {
           } />
 
           {/* Operations */}
-          <Route path="inventory" element={
-            <ProtectedRoute allowedRoles={FEATURE_ROLES.inventory_view}>
-              <Inventory />
-            </ProtectedRoute>
-          } />
           <Route path="settings" element={
             <ProtectedRoute allowedRoles={FEATURE_ROLES.settings}>
               <Settings />

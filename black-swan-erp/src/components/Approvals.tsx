@@ -35,6 +35,8 @@ const Approvals: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'PENDING' | 'HISTORY'>('PENDING');
     const [typeFilter, setTypeFilter] = useState<'ALL' | ApprovalType>('ALL');
     const [priorityFilter, setPriorityFilter] = useState<'ALL' | 'LOW' | 'MEDIUM' | 'HIGH'>('ALL');
+    const [search, setSearch] = useState('');
+    const [lastSync, setLastSync] = useState<string>('');
 
     const isApprover = currentUserRole === Role.CEO || currentUserRole === Role.PARTNER || currentUserRole === Role.ACCOUNTING;
 
@@ -43,23 +45,25 @@ const Approvals: React.FC = () => {
   }, []);
 
     const loadData = async () => {
-    setLoading(true);
-    try {
-      const data = await dataService.getApprovalRequests();
-      setRequests(data);
-    } catch (error) {
-      console.error(error);
-      showToast(t('msg.errorLoading') || 'Error loading data', 'error');
-    } finally {
-      setLoading(false);
-    }
+        setLoading(true);
+        try {
+            const data = await dataService.getApprovalRequests();
+            setRequests(data);
+            setLastSync(new Date().toISOString());
+        } catch (error) {
+            console.error(error);
+            showToast(t('msg.errorLoading') || 'Error loading data', 'error');
+        } finally {
+            setLoading(false);
+        }
+
         try {
             const access = await dataService.getPendingAccessRequests();
             setAccessRequests(access);
         } catch (err) {
             console.error(err);
         }
-  };
+    };
 
         const handleAccessAction = async (req: AccessRequest, action: 'APPROVE' | 'REJECT', role?: Role) => {
                 setProcessingId(req.id);
@@ -133,11 +137,18 @@ const Approvals: React.FC = () => {
             : requests.filter((r) => r.status !== 'PENDING');
         const byType = typeFilter === 'ALL' ? base : base.filter((r) => r.type === typeFilter);
         const byPriority = priorityFilter === 'ALL' ? byType : byType.filter((r) => (r.priority || 'MEDIUM') === priorityFilter);
+        const bySearch = search
+            ? byPriority.filter((r) =>
+                (r.title || '').toLowerCase().includes(search.toLowerCase()) ||
+                (r.requesterName || '').toLowerCase().includes(search.toLowerCase()) ||
+                (r.description || '').toLowerCase().includes(search.toLowerCase())
+            )
+            : byPriority;
         const rank = (p?: string) => (p === 'HIGH' ? 0 : p === 'MEDIUM' ? 1 : 2);
-        return [...byPriority].sort(
+        return [...bySearch].sort(
             (a, b) => rank(a.priority) - rank(b.priority) || new Date(b.date).getTime() - new Date(a.date).getTime(),
         );
-    }, [activeTab, requests, typeFilter, priorityFilter]);
+    }, [activeTab, requests, typeFilter, priorityFilter, search]);
 
     const pendingCount = useMemo(() => requests.filter((r) => r.status === 'PENDING').length, [requests]);
     const approvedCount = useMemo(() => requests.filter((r) => r.status === 'APPROVED').length, [requests]);
@@ -159,9 +170,12 @@ const Approvals: React.FC = () => {
                 title={t('approvals.title')}
                 subtitle={t('approvals.subtitle')}
                 actions={
-                    <Button variant="outline" onClick={loadData} disabled={loading} size="sm">
-                        <RefreshCw size={16} className={`mr-2 ${loading ? 'animate-spin' : ''}`} /> {t('btn.refresh') || 'Refresh'}
-                    </Button>
+                    <div className="flex items-center gap-2 text-sm text-text-muted">
+                        {lastSync && <span>{t('dashboard.updated') || 'Updated'}: {new Date(lastSync).toLocaleTimeString()}</span>}
+                        <Button variant="outline" onClick={loadData} disabled={loading} size="sm">
+                            <RefreshCw size={16} className={`mr-2 ${loading ? 'animate-spin' : ''}`} /> {t('btn.refresh') || 'Refresh'}
+                        </Button>
+                    </div>
                 }
             />
 
@@ -242,34 +256,34 @@ const Approvals: React.FC = () => {
                         : t('approvals.helperViewer') || 'You can view requests but approvals are restricted to approvers.'}
                 </p>
                 <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
-                    <label className="flex items-center gap-2 text-sm text-text-muted w-full sm:w-auto">
-                        <span className="whitespace-nowrap font-semibold">{t('approvals.filterType') || 'Type'}</span>
-                        <select
-                            className="border border-border rounded-lg px-3 py-2 bg-surface text-sm w-full sm:w-48"
-                            value={typeFilter}
-                            onChange={(e) => setTypeFilter(e.target.value as 'ALL' | ApprovalType)}
-                        >
-                            <option value="ALL">{t('approvals.allTypes') || 'All types'}</option>
-                            <option value={ApprovalType.INVOICE}>{t('approvals.typeInvoice') || 'Invoice'}</option>
-                            <option value={ApprovalType.PAYMENT}>{t('approvals.typePayment') || 'Payment'}</option>
-                            <option value={ApprovalType.EXPENSE}>{t('approvals.typeExpense') || 'Expense'}</option>
-                            <option value={ApprovalType.CONTRACT}>{t('approvals.typeContract') || 'Contract'}</option>
-                            <option value={ApprovalType.HIRING}>{t('approvals.typeHiring') || 'Hiring'}</option>
-                        </select>
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-text-muted w-full sm:w-auto">
-                        <span className="whitespace-nowrap font-semibold">{t('approvals.filterPriority') || 'Priority'}</span>
-                        <select
-                            className="border border-border rounded-lg px-3 py-2 bg-surface text-sm w-full sm:w-44"
-                            value={priorityFilter}
-                            onChange={(e) => setPriorityFilter(e.target.value as 'ALL' | 'LOW' | 'MEDIUM' | 'HIGH')}
-                        >
-                            <option value="ALL">{t('approvals.allPriorities') || 'All priorities'}</option>
-                            <option value="HIGH">{t('approvals.priorityHigh') || 'High'}</option>
-                            <option value="MEDIUM">{t('approvals.priorityMedium') || 'Medium'}</option>
-                            <option value="LOW">{t('approvals.priorityLow') || 'Low'}</option>
-                        </select>
-                    </label>
+                    <input
+                        className="border border-border rounded-lg px-3 py-2 bg-surface text-sm w-full sm:w-56"
+                        placeholder={t('search.placeholder') || 'Search'}
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                    />
+                    <select
+                        className="border border-border rounded-lg px-3 py-2 bg-surface text-sm w-full sm:w-40"
+                        value={typeFilter}
+                        onChange={(e) => setTypeFilter(e.target.value as 'ALL' | ApprovalType)}
+                    >
+                        <option value="ALL">{t('approvals.allTypes') || 'All types'}</option>
+                        <option value={ApprovalType.INVOICE}>{t('approvals.typeInvoice') || 'Invoice'}</option>
+                        <option value={ApprovalType.PAYMENT}>{t('approvals.typePayment') || 'Payment'}</option>
+                        <option value={ApprovalType.EXPENSE}>{t('approvals.typeExpense') || 'Expense'}</option>
+                        <option value={ApprovalType.CONTRACT}>{t('approvals.typeContract') || 'Contract'}</option>
+                        <option value={ApprovalType.HIRING}>{t('approvals.typeHiring') || 'Hiring'}</option>
+                    </select>
+                    <select
+                        className="border border-border rounded-lg px-3 py-2 bg-surface text-sm w-full sm:w-36"
+                        value={priorityFilter}
+                        onChange={(e) => setPriorityFilter(e.target.value as 'ALL' | 'LOW' | 'MEDIUM' | 'HIGH')}
+                    >
+                        <option value="ALL">{t('approvals.allPriorities') || 'All priorities'}</option>
+                        <option value="HIGH">{t('approvals.priorityHigh') || 'High'}</option>
+                        <option value="MEDIUM">{t('approvals.priorityMedium') || 'Medium'}</option>
+                        <option value="LOW">{t('approvals.priorityLow') || 'Low'}</option>
+                    </select>
                 </div>
             </div>
 
@@ -302,56 +316,50 @@ const Approvals: React.FC = () => {
                             <p className="text-text-muted">{t('approvals.emptySubtitle') || "You're all caught up!"}</p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredRequests.map(req => {
-                        const style = getTypeStyles(req.type);
-                        const Icon = style.icon;
-                        
-                        return (
-                            <Card key={req.id} className="hover:shadow-md transition-shadow relative overflow-hidden group border border-border">
-                                {req.priority === 'HIGH' && activeTab === 'PENDING' && (
-                                    <div className="absolute top-0 right-0 w-1.5 h-full bg-danger"></div>
-                                )}
-                                <CardContent className="p-6">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className={`p-3 rounded-xl ${style.bg} ${style.color}`}>
-                                            <Icon size={24} />
-                                        </div>
-                                        <div className="flex flex-col items-end gap-2">
-                                            {req.priority === 'HIGH' && activeTab === 'PENDING' && (
-                                                <Badge variant="danger">{t('approvals.priorityHigh') || 'High Priority'}</Badge>
-                                            )}
-                                            {activeTab === 'HISTORY' && (
-                                                <Badge variant={req.status === 'APPROVED' ? 'success' : 'danger'}>
-                                                    {getStatusLabel(req.status)}
-                                                </Badge>
-                                            )}
+                <div className="overflow-hidden rounded-xl border border-border bg-surface">
+                    <div className="hidden lg:grid grid-cols-12 px-4 py-3 text-xs font-bold text-text-muted border-b border-border uppercase">
+                        <span className="col-span-4">{t('approvals.title') || 'Title'}</span>
+                        <span className="col-span-2">{t('approvals.type') || 'Type'}</span>
+                        <span className="col-span-2">{t('approvals.requester') || 'Requester'}</span>
+                        <span className="col-span-1 text-right">{t('approvals.amount') || 'Amount'}</span>
+                        <span className="col-span-1 text-center">{t('approvals.status') || 'Status'}</span>
+                        <span className="col-span-2 text-center">{t('approvals.date') || 'Date'}</span>
+                    </div>
+                    <div className="divide-y divide-border">
+                        {filteredRequests.map((req) => {
+                            const style = getTypeStyles(req.type);
+                            const Icon = style.icon;
+                            return (
+                                <div key={req.id} className="px-4 py-4 grid grid-cols-1 lg:grid-cols-12 gap-3 items-center hover:bg-secondary/30">
+                                    <div className="col-span-4 flex items-center gap-3">
+                                        <div className={`p-2 rounded-lg ${style.bg} ${style.color}`}><Icon size={18} /></div>
+                                        <div>
+                                            <p className="font-semibold text-text line-clamp-1">{req.title}</p>
+                                            <p className="text-xs text-text-muted line-clamp-2">{req.description}</p>
                                         </div>
                                     </div>
-
-                                    <h3 className="font-bold text-text text-lg mb-1 line-clamp-1">{req.title}</h3>
-                                    <p className="text-text-muted text-sm mb-4 line-clamp-2 h-10">{req.description}</p>
-
-                                    <div className="flex justify-between items-center text-xs text-text-muted mb-6 bg-secondary/30 p-3 rounded-lg">
-                                        <div className="flex items-center gap-1">
-                                            <User size={12}/> {req.requesterName}
-                                        </div>
-                                        <div>{new Date(req.date).toLocaleDateString()}</div>
+                                    <div className="col-span-2 flex items-center gap-2 text-sm font-medium text-text">
+                                        <Badge variant="outline">{t(`approvals.type.${req.type?.toLowerCase()}`) || req.type}</Badge>
+                                        {req.priority === 'HIGH' && activeTab === 'PENDING' && <Badge variant="danger">{t('approvals.priorityHigh') || 'High'}</Badge>}
                                     </div>
+                                    <div className="col-span-2 text-sm text-text flex items-center gap-2">
+                                        <User size={14} className="text-text-muted" />
+                                        <span>{req.requesterName || '-'}</span>
+                                    </div>
+                                    <div className="col-span-1 text-right text-sm font-bold text-text">{req.amount ? `${req.amount.toLocaleString()} ${t('currency')}` : '--'}</div>
+                                    <div className="col-span-1 flex justify-center">
+                                        <Badge variant={req.status === 'APPROVED' ? 'success' : req.status === 'REJECTED' ? 'danger' : 'warning'}>
+                                            {getStatusLabel(req.status)}
+                                        </Badge>
+                                    </div>
+                                    <div className="col-span-2 text-center text-sm text-text-muted">{new Date(req.date).toLocaleDateString()}</div>
 
-                                    {req.amount && (
-                                        <div className="mb-6">
-                                            <p className="text-xs text-text-muted uppercase font-bold">{t('approvals.amount') || 'Amount'}</p>
-                                            <p className="text-xl font-bold text-text">{req.amount.toLocaleString()} <span className="text-sm font-normal text-text-muted">{t('currency')}</span></p>
-                                        </div>
-                                    )}
-
-                                    <div className="flex gap-3">
+                                    <div className="col-span-12 flex flex-wrap gap-2 justify-end">
                                         {req.status === 'PENDING' ? (
                                             <>
                                                 <Button 
                                                     variant="danger"
-                                                    className="flex-1 opacity-90 hover:opacity-100"
+                                                    className="min-w-[120px]"
                                                     onClick={() => handleAction(req, 'REJECT')}
                                                     loading={processingId === req.id}
                                                     disabled={!!processingId || !isApprover}
@@ -360,7 +368,7 @@ const Approvals: React.FC = () => {
                                                 </Button>
                                                 <Button 
                                                     variant="primary" 
-                                                    className="flex-1"
+                                                    className="min-w-[120px]"
                                                     onClick={() => handleAction(req, 'APPROVE')}
                                                     loading={processingId === req.id}
                                                     disabled={!!processingId || !isApprover}
@@ -369,25 +377,25 @@ const Approvals: React.FC = () => {
                                                 </Button>
                                             </>
                                         ) : (
-                                            <div className="w-full text-center text-sm font-medium text-text-muted flex items-center justify-center gap-2 bg-secondary/50 py-2 rounded-lg">
+                                            <div className="px-3 py-2 rounded-lg bg-secondary/60 text-sm font-medium text-text flex items-center gap-2">
                                                 {req.status === 'APPROVED' ? <CheckCircle size={16} className="text-success"/> : <XCircle size={16} className="text-danger"/>}
                                                 <span>{t('approvals.processed') || 'Processed'}</span>
                                             </div>
                                         )}
+
+                                        {req.relatedEntityId && req.type === ApprovalType.INVOICE && (
+                                            <button 
+                                                onClick={() => navigateToEntity(req)}
+                                                className="text-xs font-bold text-primary flex items-center gap-1 hover:underline"
+                                            >
+                                                {t('approvals.viewDetails') || 'View Details'} <ArrowUpRight size={12} />
+                                            </button>
+                                        )}
                                     </div>
-                                    
-                                    {req.relatedEntityId && req.type === ApprovalType.INVOICE && (
-                                        <button 
-                                            onClick={() => navigateToEntity(req)}
-                                            className="w-full mt-3 text-xs font-bold text-primary flex items-center justify-center gap-1 hover:underline"
-                                        >
-                                            {t('approvals.viewDetails') || 'View Details'} <ArrowUpRight size={12} />
-                                        </button>
-                                    )}
-                                </CardContent>
-                            </Card>
-                        );
-                    })}
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
         </div>
