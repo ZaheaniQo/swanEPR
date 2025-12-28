@@ -25,8 +25,8 @@ ALTER TABLE profiles ALTER COLUMN role SET DEFAULT 'PENDING';
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, email, full_name, role)
-  VALUES (NEW.id, NEW.email, NEW.raw_user_meta_data->>'full_name', 'PENDING');
+  INSERT INTO public.profiles (id, email, status)
+  VALUES (NEW.id, NEW.email, 'PENDING');
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -85,9 +85,14 @@ BEGIN
   SELECT EXISTS (
     SELECT 1
     FROM user_roles ur
+    JOIN user_tenants ut
+      ON ut.user_id = ur.user_id
+     AND ut.tenant_id = ur.tenant_id
     JOIN role_permissions rp ON ur.role_id = rp.role_id
     JOIN permissions p ON rp.permission_id = p.id
     WHERE ur.user_id = has_permission.user_id
+    AND ur.tenant_id = app.current_tenant_id()
+    AND ut.status = 'ACTIVE'
     AND p.code = required_permission
   ) INTO has_perm;
 
@@ -136,9 +141,9 @@ BEGIN
       RAISE EXCEPTION 'Security Violation: Cannot delete a POSTED journal entry. Reverse it instead.';
     END IF;
     
-    IF TG_OP = 'UPDATE' AND NEW.status != 'VOIDED' THEN
+    IF TG_OP = 'UPDATE' AND NEW.status != 'VOID' THEN
        -- Allow only specific fields to be updated if necessary (like notes), but lock financials
-       IF NEW.date != OLD.date OR NEW.total_amount != OLD.total_amount THEN
+       IF NEW.date != OLD.date THEN
           RAISE EXCEPTION 'Security Violation: Cannot modify financial data of a POSTED journal.';
        END IF;
     END IF;
@@ -377,9 +382,9 @@ DECLARE
   v_total_value NUMERIC;
 BEGIN
   -- Get Account IDs (Assuming standard codes)
-  SELECT id INTO v_inventory_account FROM coa_accounts WHERE code = '1200' LIMIT 1; -- Inventory Asset
-  SELECT id INTO v_cogs_account FROM coa_accounts WHERE code = '5000' LIMIT 1; -- COGS
-  SELECT id INTO v_adjustment_account FROM coa_accounts WHERE code = '5400' LIMIT 1; -- General Expense/Adjustment
+  SELECT id INTO v_inventory_account FROM coa_accounts WHERE code = '1200' AND tenant_id = NEW.tenant_id; -- Inventory Asset
+  SELECT id INTO v_cogs_account FROM coa_accounts WHERE code = '5000' AND tenant_id = NEW.tenant_id; -- COGS
+  SELECT id INTO v_adjustment_account FROM coa_accounts WHERE code = '5400' AND tenant_id = NEW.tenant_id; -- General Expense/Adjustment
 
   -- Calculate Value
   v_unit_cost := COALESCE(NEW.unit_cost, 0);
@@ -388,26 +393,26 @@ BEGIN
   IF v_total_value = 0 OR v_inventory_account IS NULL OR v_cogs_account IS NULL THEN RETURN NEW; END IF;
 
   -- Create Journal Header
-  INSERT INTO journal_entries (date, description, status, created_by, reference)
-  VALUES (CURRENT_DATE, 'Auto-generated from Inventory Movement: ' || NEW.type, 'POSTED', NEW.user_id, 'INV-' || NEW.id)
+  INSERT INTO journal_entries (date, description, status, created_by, reference, tenant_id)
+  VALUES (CURRENT_DATE, 'Auto-generated from Inventory Movement: ' || NEW.type, 'POSTED', NEW.user_id, 'INV-' || NEW.id, NEW.tenant_id)
   RETURNING id INTO v_journal_id;
 
   -- Create Journal Lines based on Type
   IF NEW.type = 'RECEIPT' THEN
      -- Dr Inventory, Cr Adjustment (or AP if linked, but here we use Adjustment/Suspense)
-     INSERT INTO journal_lines (journal_id, account_id, description, debit, credit)
-     VALUES (v_journal_id, v_inventory_account, 'Inventory Receipt', v_total_value, 0);
+     INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, tenant_id)
+     VALUES (v_journal_id, v_inventory_account, 'Inventory Receipt', v_total_value, 0, NEW.tenant_id);
      
-     INSERT INTO journal_lines (journal_id, account_id, description, debit, credit)
-     VALUES (v_journal_id, v_adjustment_account, 'Inventory Receipt Offset', 0, v_total_value);
+     INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, tenant_id)
+     VALUES (v_journal_id, v_adjustment_account, 'Inventory Receipt Offset', 0, v_total_value, NEW.tenant_id);
 
   ELSIF NEW.type = 'ISSUE' THEN
      -- Dr COGS, Cr Inventory
-     INSERT INTO journal_lines (journal_id, account_id, description, debit, credit)
-     VALUES (v_journal_id, v_cogs_account, 'Inventory Issue / COGS', v_total_value, 0);
+     INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, tenant_id)
+     VALUES (v_journal_id, v_cogs_account, 'Inventory Issue / COGS', v_total_value, 0, NEW.tenant_id);
      
-     INSERT INTO journal_lines (journal_id, account_id, description, debit, credit)
-     VALUES (v_journal_id, v_inventory_account, 'Inventory Issue', 0, v_total_value);
+     INSERT INTO journal_lines (journal_id, account_id, description, debit, credit, tenant_id)
+     VALUES (v_journal_id, v_inventory_account, 'Inventory Issue', 0, v_total_value, NEW.tenant_id);
   END IF;
 
   RETURN NEW;

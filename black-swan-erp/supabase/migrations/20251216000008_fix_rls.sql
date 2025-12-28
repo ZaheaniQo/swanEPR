@@ -2,12 +2,14 @@
 -- This replaces the permissive "Enable all access" policies with strict tenant checks.
 
 -- Helper function to get current tenant_id safely
+CREATE SCHEMA IF NOT EXISTS app;
+CREATE OR REPLACE FUNCTION app.current_tenant_id() RETURNS UUID AS $$
+  SELECT NULLIF(current_setting('request.jwt.claims', true)::jsonb ->> 'tenant_id', '')::uuid;
+$$ LANGUAGE SQL STABLE;
+
 CREATE OR REPLACE FUNCTION get_current_tenant_id() RETURNS UUID AS $$
 BEGIN
-  RETURN COALESCE(
-    (current_setting('request.jwt.claims', true)::jsonb -> 'app_metadata' ->> 'tenant_id')::uuid,
-    auth.uid() -- Fallback for development/testing where user ID is treated as tenant ID
-  );
+  RETURN NULLIF(current_setting('request.jwt.claims', true)::jsonb ->> 'tenant_id', '')::uuid;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

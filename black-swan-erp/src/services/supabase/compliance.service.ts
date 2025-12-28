@@ -1,5 +1,5 @@
 
-import { supabase } from '../supabaseClient';
+import { supabase, getTenantIdFromSession } from '../supabaseClient';
 import { TaxInvoice, InvoiceType, AuditLog, AccountType } from "../../types";
 import { accountingService } from "./accounting.service";
 
@@ -9,7 +9,7 @@ const TBL_INVOICES = 'invoices';
 const getContext = async () => {
   const { data } = await supabase.auth.getUser();
   if (!data.user) throw new Error('Unauthorized');
-  const tenantId = data.user.app_metadata?.tenant_id || data.user.id;
+  const tenantId = await getTenantIdFromSession();
   return { tenantId };
 };
 

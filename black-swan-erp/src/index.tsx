@@ -1,3 +1,2 @@
-// Legacy entry point – import from src/main.tsx instead.
+// Legacy entry point – import App from src/main.tsx instead.
 export { default as App } from './App';
-export * from './App';

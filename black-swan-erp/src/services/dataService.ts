@@ -1,21 +1,51 @@
-﻿
-import { 
-  Contract, ContractStatus, InventoryItem, Employee, Project, 
-  ProjectStageStatus, PaymentStatus, InventoryTransactionType, 
-  LedgerEntry, Invoice, Expense, PaymentTerm, PaymentAmountType, 
-  ContractParty, CompanySettings, TaxInvoice, InvoiceType,
-  ApprovalRequest, ApprovalType, DeliveryNote, Quotation, Receipt,
-  Supplier, SupplierType, Customer, Product, Disbursement,
-    PaymentTrigger, JournalEntry, JournalStatus, InvoiceStatus,
-    TaxInvoiceItem, InventoryMovement, InventoryMovementType,
-    AccessRequest, LeaveRecord, Role
-} from '../types';
-import { supabase } from './supabaseClient';
-import * as dbCore from './supabase/core';
-import { accountingService } from './supabase/accounting.service';
+﻿import { getTenantIdFromSession } from '../lib/supabase';
 import { approvalsRepository } from '../repositories/approvalsRepository';
 import { disbursementsRepository } from '../repositories/disbursementsRepository';
+import {
+    AccessRequest,
+    ApprovalRequest,
+    ApprovalType,
+    CapitalEventType,
+    CompanySettings,
+    Contract,
+    ContractParty,
+    ContractStatus,
+    Customer,
+    DeliveryNote,
+    Disbursement,
+    Employee,
+    Expense,
+    Invoice,
+    InvoiceStatus,
+    InvoiceType,
+    InventoryItem,
+    InventoryMovement,
+    InventoryMovementType,
+    InventoryTransactionType,
+    JournalEntry,
+    JournalStatus,
+    LedgerEntry,
+    LeaveRecord,
+    EquityTransactionType,
+    PaymentAmountType,
+    PaymentStatus,
+    PaymentTerm,
+    PaymentTrigger,
+    Product,
+    Project,
+    ProjectStageStatus,
+    Quotation,
+    Receipt,
+    Role,
+    Supplier,
+    SupplierType,
+    TaxInvoice,
+    TaxInvoiceItem,
+} from '../types';
 import { TenantError } from '../utils/tenantGuard';
+import { accountingService } from './supabase/accounting.service';
+import * as dbCore from './supabase/core';
+import { supabase } from './supabaseClient';
 
 // Table Constants (Supabase uses snake_case usually, assuming table names)
 const TBL = {
@@ -47,6 +77,84 @@ const TBL = {
   ACCOUNTS: 'coa_accounts'
 };
 
+type PartnerShareRow = {
+    partner_id: string;
+    profile_id: string;
+    partner_name: string | null;
+    status: 'ACTIVE' | 'INACTIVE';
+    joined_at: string | null;
+    exited_at: string | null;
+    shares: number;
+    tenant_id: string;
+};
+
+type CapTableRow = {
+    partnerId: string;
+    profileId: string;
+    partnerName: string;
+    shares: number;
+    ownershipPct: number;
+    currentValue: number;
+    status: 'ACTIVE' | 'INACTIVE';
+    joinedAt: string | null;
+    exitedAt: string | null;
+};
+
+type CapTableSummary = {
+    netProfit: number;
+    valuation: number;
+    totalShares: number;
+    pricePerShare: number;
+    currency: string;
+};
+
+type CapTablePayload = {
+    rows: CapTableRow[];
+    summary: CapTableSummary;
+    canManage: boolean;
+    restrictedToProfileId?: string | null;
+};
+
+type CapitalEventInput = {
+    eventType: CapitalEventType;
+    amount: number;
+    valuation: number;
+    notes?: string;
+};
+
+type EquityTransactionInput = {
+    transactionType: EquityTransactionType;
+    fromPartnerId?: string;
+    toPartnerId?: string;
+    shares: number;
+    pricePerShare: number;
+    valuation: number;
+};
+
+type EquityPreviewResult = {
+    rows: CapTableRow[];
+    summary: CapTableSummary;
+};
+
+type PartnerAuditEvent = {
+    eventTime: string;
+    eventType: 'EQUITY' | 'CAPITAL' | 'APPROVAL' | 'AUDIT';
+    description: string;
+    referenceType: string;
+    referenceId: string | null;
+    performedBy: string | null;
+    approvalStatus: string | null;
+    partnerId: string | null;
+};
+
+type SupabaseUserLite = {
+    id: string;
+    email?: string;
+    app_metadata?: Record<string, unknown>;
+    user_metadata?: Record<string, unknown>;
+    roles?: string[];
+};
+
 // Helper to map DB rows (snake_case) to Product (camelCase)
 const mapProduct = (row: any): Product => ({
   id: row.id,
@@ -64,9 +172,9 @@ const mapProduct = (row: any): Product => ({
     cost: s.cost,
     price: s.price
   })),
-  notes: row.notes,
-  price: row.price,
-  image: row.image,
+  notes: row.notes ?? row.description ?? undefined,
+  price: row.sales_price ?? row.price,
+  image: row.image_url ?? row.image,
   rating: row.rating,
   availability: row.availability
 });
@@ -244,12 +352,54 @@ class DataService {
         if (error) throw error;
 
         const session = data?.session;
-        const user = session?.user;
-      if (!user) throw new TenantError('No active session');
+      const user = session?.user as SupabaseUserLite | undefined;
+        if (!user) throw new TenantError('No active session');
 
-        const tenantId = (user.user_metadata as any)?.tenant_id || (user.app_metadata as any)?.tenant_id || user.id;
+        const tenantId = await getTenantIdFromSession();
+        const { data: rolesData, error: rolesError } = await supabase
+          .from('user_roles')
+          .select('role:roles(name)')
+          .eq('user_id', user.id)
+          .eq('tenant_id', tenantId);
+        if (rolesError) throw rolesError;
 
-        return { userId: user.id, tenantId, user };
+        const roles = (rolesData || [])
+          .map((row: any) => row.role?.name)
+          .filter(Boolean) as string[];
+
+        return { userId: user.id, tenantId, user: { ...user, roles } };
+  }
+
+  private _extractRoles(user: SupabaseUserLite | null | undefined): string[] {
+      const roles = (user?.roles || []).map((r) => String(r));
+      return Array.from(new Set(roles));
+  }
+
+  private _isCeo(user: SupabaseUserLite | null | undefined): boolean {
+      const roles = this._extractRoles(user);
+      return roles.includes(Role.CEO) || roles.includes(Role.SUPER_ADMIN);
+  }
+
+  private _isPartner(user: SupabaseUserLite | null | undefined): boolean {
+      const roles = this._extractRoles(user);
+      return roles.includes(Role.PARTNER);
+  }
+
+  private _assertCeo(user: SupabaseUserLite | null | undefined) {
+      if (!this._isCeo(user)) {
+          throw new TenantError('Only CEO can perform this action');
+      }
+  }
+
+  private async _getPartnerIdForUser(userId: string, tenantId: string): Promise<string | null> {
+      const { data, error } = await supabase
+        .from('partners')
+        .select('id')
+        .eq('profile_id', userId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.id || null;
   }
 
   // --- EMPLOYEES ---
@@ -462,11 +612,17 @@ class DataService {
   async addProduct(product: Product): Promise<void> {
     const { tenantId } = await this._getContext();
     const { sizes, ...prodData } = product;
+
+    if (!prodData.name) throw new Error('Product name is required');
+    if (!sizes || sizes.length === 0) throw new Error('At least one size is required');
+    if (sizes.some((s) => !s.size || s.cost == null || s.price == null)) {
+      throw new Error('Invalid size values');
+    }
     
     const productPayload = {
         sku: prodData.sku,
         name: prodData.name,
-        description: prodData.description,
+        description: prodData.description ?? prodData.notes,
         category: prodData.category,
         base_unit: prodData.baseUnit,
         sales_price: prodData.price,
@@ -493,18 +649,51 @@ class DataService {
   }
 
   async updateProduct(id: string, updates: Partial<Product>): Promise<void> {
-    // Simplified update
     const { tenantId } = await this._getContext();
     const { sizes, ...prodData } = updates;
-    const dbUpdates: any = {};
-    // ... mapping logic ...
-    if (prodData.name) dbUpdates.name = prodData.name;
-    // ... (omitted for brevity, same as before) ...
-    
-    if (Object.keys(dbUpdates).length > 0) {
-        await supabase.from(TBL.PRODUCTS).update(dbUpdates).eq('id', id).eq('tenant_id', tenantId);
+
+    if (prodData.name === '') throw new Error('Product name is required');
+    if (Array.isArray(sizes)) {
+      if (sizes.length === 0) throw new Error('At least one size is required');
+      if (sizes.some((s) => !s.size || s.cost == null || s.price == null)) {
+        throw new Error('Invalid size values');
+      }
     }
-    // Size updates would require a separate RPC or logic
+
+    const productPayload = {
+      sku: prodData.sku,
+      name: prodData.name,
+      description: prodData.description ?? prodData.notes,
+      category: prodData.category,
+      base_unit: prodData.baseUnit,
+      sales_price: prodData.price,
+      standard_cost: prodData.avgCost,
+      avg_cost: prodData.avgCost,
+      image_url: prodData.image,
+      quality_level: prodData.qualityLevel,
+      sku_prefix: prodData.skuPrefix,
+    };
+
+    const cleanedProduct = Object.fromEntries(
+      Object.entries(productPayload).filter(([, value]) => value !== undefined)
+    );
+
+    const sizesPayload = Array.isArray(sizes)
+      ? sizes.map((s) => ({
+          size: s.size,
+          cost: s.cost,
+          price: s.price,
+        }))
+      : null;
+
+    const { error } = await supabase.rpc('update_product_with_sizes', {
+      p_product_id: id,
+      p_product: cleanedProduct,
+      p_sizes: sizesPayload,
+      p_tenant_id: tenantId,
+    });
+
+    if (error) throw error;
   }
 
   async deleteProduct(id: string): Promise<void> {
@@ -552,7 +741,7 @@ class DataService {
 
   async addContract(contract: Contract): Promise<Contract> {
     const { items, paymentTerms, partyA, partyB, ...rest } = contract;
-    const { userId, tenantId } = await this._getContext();
+    await this._getContext();
     
     const contractPayload = {
         contract_number: contract.contractNumber,
@@ -621,7 +810,7 @@ class DataService {
 
   // --- PAYMENTS ---
   async payMilestone(milestoneId: string, contractId: string, amount: number, method: string): Promise<void> {
-      const { userId, tenantId } = await this._getContext();
+      await this._getContext();
       const contract = await this.getContractById(contractId); // Helper needed
       if (!contract) return;
 
@@ -695,7 +884,7 @@ class DataService {
   }
 
   async updateInventory(stockId: string, quantity: number, type: InventoryTransactionType): Promise<void> {
-        const { userId, tenantId } = await this._getContext();
+        await this._getContext();
     
     // We need product_id and warehouse_id. 
     // The RPC takes product_id and warehouse_id. 
@@ -855,7 +1044,7 @@ class DataService {
   }
 
   async addDisbursement(disbursement: Partial<Disbursement>): Promise<void> {
-      const { userId, tenantId } = await this._getContext();
+      await this._getContext();
       const amount = disbursement.amount ?? 0;
       const payload = {
           description: disbursement.description || disbursement.category || '',
@@ -944,10 +1133,10 @@ class DataService {
           description: req.description,
           requester_id: requesterId,
           requester_name: requesterName,
-          target_type: req.type,
-          target_id: req.relatedEntityId || null,
+          target_type: req.targetType || req.type,
+          target_id: req.targetId || req.relatedEntityId || null,
           status: req.status || 'PENDING',
-          related_entity_id: req.relatedEntityId || null,
+          related_entity_id: req.relatedEntityId || req.targetId || null,
           amount: req.amount || null,
           priority: req.priority || 'MEDIUM',
           decision_by: null,
@@ -960,7 +1149,9 @@ class DataService {
               amount: req.amount,
               priority: req.priority,
               type: req.type,
-              relatedEntityId: req.relatedEntityId,
+              relatedEntityId: req.relatedEntityId || req.targetId || null,
+              targetType: req.targetType || req.type,
+              targetId: req.targetId || req.relatedEntityId || null,
               requesterName,
               requesterId: req.requesterId || null
           }
@@ -970,7 +1161,7 @@ class DataService {
   }
 
   async processApproval(id: string, action: 'APPROVE' | 'REJECT'): Promise<void> {
-      const { userId, tenantId } = await this._getContext();
+      await this._getContext();
       const status = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
 
       await approvalsRepository.update(id, {
@@ -1007,15 +1198,14 @@ class DataService {
 
   async createJournalEntry(entry: Partial<JournalEntry>): Promise<void> {
       const { lines, ...jeData } = entry;
-      const { userId, tenantId } = await this._getContext();
+      await this._getContext();
       
       const entryPayload = {
           entry_number: jeData.entryNumber || `JE-${Date.now()}`,
           date: jeData.date,
           reference: jeData.reference,
           description: jeData.description,
-          status: jeData.status || 'DRAFT',
-          created_by: userId
+          status: jeData.status || 'DRAFT'
       };
 
       const linesPayload = (lines || []).map(l => ({
@@ -1026,10 +1216,9 @@ class DataService {
           credit: l.credit
       }));
 
-      const { error } = await supabase.rpc('create_journal_entry', {
+      const { error } = await supabase.rpc('create_journal_entry_secure', {
           p_entry: entryPayload,
-          p_lines: linesPayload,
-          p_tenant_id: tenantId
+          p_lines: linesPayload
       });
       
       if (error) throw error;
@@ -1442,7 +1631,7 @@ class DataService {
   }
 
   async convertQuotationToContract(quotationId: string): Promise<Contract | null> {
-      const { userId, tenantId } = await this._getContext();
+      await this._getContext();
       const q = await this.getQuotationById(quotationId);
       if (!q) return null;
 
@@ -1514,7 +1703,14 @@ class DataService {
   }
 
   async activateUserProfile(_id: string, _role: Role): Promise<void> {
-      const { userId, tenantId } = await this._getContext();
+      await this._getContext();
+      const { error: roleError } = await supabase.rpc('assign_user_role', {
+        p_user_id: _id,
+        p_role_name: _role,
+        p_tenant_id: tenantId
+      });
+      if (roleError) throw roleError;
+
       await supabase
         .from('profiles')
         .update({
@@ -1528,7 +1724,14 @@ class DataService {
   }
 
   async rejectUserProfile(_id: string): Promise<void> {
-      const { userId, tenantId } = await this._getContext();
+      await this._getContext();
+      const { error: statusError } = await supabase.rpc('set_user_tenant_status', {
+        p_user_id: _id,
+        p_tenant_id: tenantId,
+        p_status: 'REJECTED'
+      });
+      if (statusError) throw statusError;
+
       await supabase
         .from('profiles')
         .update({
@@ -1766,9 +1969,8 @@ class DataService {
   }
 
   async signUpAndRequestAccess(_payload: any): Promise<void> {
-            const { fullName, email, password, tenantId } = _payload || {};
+            const { fullName, email, password } = _payload || {};
       const metadata: Record<string, any> = { full_name: fullName };
-      if (tenantId) metadata.tenant_id = tenantId;
       const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -1788,6 +1990,20 @@ class DataService {
               priority: 'MEDIUM'
           } as any);
       }
+  }
+
+  async signInWithPassword(email: string, password: string) {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      return data;
+  }
+
+  async updateUserPassword(newPassword: string) {
+      const { error } = await supabase.auth.updateUser({
+          password: newPassword,
+          data: { password_changed: true }
+      });
+      if (error) throw error;
   }
 
   async getRoles(): Promise<Role[]> {
@@ -1873,8 +2089,396 @@ class DataService {
       }
   }
 
-  async getBreakEvenAnalysis() { 
-      return { fixedCosts: 0, variableCosts: 0, revenue: 0, breakEvenRevenue: 0, netProfit: 0 }; 
+  // --- PARTNERS & CAPITAL MANAGEMENT ---
+  private async getLatestApprovedValuation(tenantId: string): Promise<number> {
+      const { data: approvals } = await supabase
+        .from('approvals')
+        .select('target_id')
+        .eq('target_type', 'capital_event')
+        .eq('status', 'APPROVED')
+        .eq('tenant_id', tenantId)
+        .order('decision_at', { ascending: false })
+        .limit(50);
+
+      const approvedIds = (approvals || [])
+        .map((row) => row.target_id)
+        .filter((id): id is string => Boolean(id));
+
+      if (approvedIds.length === 0) return 0;
+
+      const { data } = await supabase
+        .from('capital_events')
+        .select('valuation, created_at')
+        .in('id', approvedIds)
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      return Number(data?.[0]?.valuation || 0);
+  }
+
+  private _buildCapRows(partnerShares: PartnerShareRow[], totalShares: number, pricePerShare: number, restrictedProfileId?: string | null): CapTableRow[] {
+      const filtered = restrictedProfileId
+        ? partnerShares.filter((row) => row.profile_id === restrictedProfileId)
+        : partnerShares;
+
+      return filtered.map((row) => {
+          const shares = Number(row.shares || 0);
+          const ownershipPct = totalShares > 0 ? (shares / totalShares) * 100 : 0;
+          return {
+              partnerId: row.partner_id,
+              profileId: row.profile_id,
+              partnerName: row.partner_name || 'Partner',
+              shares,
+              ownershipPct,
+              currentValue: shares * pricePerShare,
+              status: row.status,
+              joinedAt: row.joined_at,
+              exitedAt: row.exited_at
+          } as CapTableRow;
+      });
+  }
+
+  async getPartnerShares(): Promise<PartnerShareRow[]> {
+      const { tenantId, user } = await this._getContext();
+      const { data, error } = await supabase
+        .from<PartnerShareRow>('view_partner_shares')
+        .select('*')
+        .eq('tenant_id', tenantId);
+      if (error) throw error;
+
+      const rows = data || [];
+      if (this._isCeo(user)) return rows;
+      if (this._isPartner(user)) return rows.filter((row) => row.profile_id === user?.id);
+      return rows;
+  }
+
+  async getTotalShares(): Promise<number> {
+      const { tenantId } = await this._getContext();
+      const { data, error } = await supabase
+        .from<{ total_shares: number }>('view_total_shares')
+        .select('total_shares')
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      if (error) throw error;
+      return Number(data?.total_shares || 0);
+  }
+
+  async getNetProfit(): Promise<{ netProfit: number; revenue: number; expenses: number }> {
+      const { tenantId } = await this._getContext();
+      const { data, error } = await supabase
+        .from<{ net_profit: number; revenue: number; expenses: number }>('view_net_profit')
+        .select('net_profit, revenue, expenses')
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      if (error) throw error;
+      return {
+          netProfit: Number(data?.net_profit || 0),
+          revenue: Number(data?.revenue || 0),
+          expenses: Number(data?.expenses || 0)
+      };
+  }
+
+  async getCapTable(): Promise<CapTablePayload> {
+      const { tenantId, user } = await this._getContext();
+      const [shares, totalShares, net, valuation] = await Promise.all([
+          this.getPartnerShares(),
+          this.getTotalShares(),
+          this.getNetProfit(),
+          this.getLatestApprovedValuation(tenantId)
+      ]);
+
+      const pricePerShare = totalShares > 0 ? valuation / totalShares : 0;
+      const restrictedProfileId = this._isCeo(user) ? null : user?.id;
+      const rows = this._buildCapRows(shares, totalShares, pricePerShare, restrictedProfileId);
+
+      return {
+          rows,
+          summary: {
+              netProfit: net.netProfit,
+              valuation,
+              totalShares,
+              pricePerShare,
+              currency: 'SAR'
+          },
+          canManage: this._isCeo(user),
+          restrictedToProfileId: restrictedProfileId
+      };
+  }
+
+  async getPartnersDashboard(): Promise<CapTablePayload> {
+      // Alias for external callers; keep getCapTable as the core implementation
+      return this.getCapTable();
+  }
+
+  async getPartnerAuditTimeline(partnerId?: string): Promise<PartnerAuditEvent[]> {
+      const { tenantId, user, userId } = await this._getContext();
+      const isCeo = this._isCeo(user);
+      let scopedPartnerId = partnerId;
+
+      if (!isCeo) {
+          scopedPartnerId = partnerId || (await this._getPartnerIdForUser(userId, tenantId)) || undefined;
+      }
+
+      let query = supabase
+        .from('view_partner_audit_timeline')
+        .select('event_time, event_type, description, reference_type, reference_id, performed_by, approval_status, partner_id')
+        .eq('tenant_id', tenantId)
+        .order('event_time', { ascending: false })
+        .limit(200);
+
+      if (scopedPartnerId) {
+          query = query.eq('partner_id', scopedPartnerId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      return (data || []).map((row) => ({
+          eventTime: row.event_time,
+          eventType: row.event_type,
+          description: row.description,
+          referenceType: row.reference_type,
+          referenceId: row.reference_id,
+          performedBy: row.performed_by,
+          approvalStatus: row.approval_status,
+          partnerId: row.partner_id
+      }));
+  }
+
+  async generateCapTablePDF(capTable?: CapTablePayload): Promise<Blob> {
+      const { user } = await this._getContext();
+      this._assertCeo(user);
+
+      const snapshot = capTable || (await this.getCapTable());
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF();
+
+      const formatCurrency = (value: number, currency = 'SAR') =>
+          new Intl.NumberFormat('en-SA', { style: 'currency', currency }).format(value || 0);
+
+      doc.setFontSize(14);
+      doc.text('Cap Table Snapshot', 10, 12);
+      doc.setFontSize(10);
+      doc.text(`Generated: ${new Date().toISOString()}`, 10, 18);
+      doc.text(`Valuation: ${formatCurrency(snapshot.summary.valuation, snapshot.summary.currency)}`, 10, 26);
+      doc.text(`Total Shares: ${snapshot.summary.totalShares.toLocaleString()}`, 10, 32);
+      doc.text(`Price / Share: ${formatCurrency(snapshot.summary.pricePerShare, snapshot.summary.currency)}`, 10, 38);
+
+      let y = 48;
+      doc.setFontSize(11);
+      doc.text('Partner', 10, y);
+      doc.text('Shares', 70, y);
+      doc.text('Ownership %', 110, y);
+      doc.text('Value', 150, y);
+      doc.setLineWidth(0.2);
+      doc.line(10, y + 2, 200, y + 2);
+      y += 8;
+
+      snapshot.rows.forEach((row, index) => {
+          if (y > 280) {
+              doc.addPage();
+              y = 20;
+          }
+          doc.setFontSize(10);
+          doc.text(`${index + 1}. ${row.partnerName}`, 10, y);
+          doc.text(row.shares.toLocaleString(), 70, y);
+          doc.text(`${row.ownershipPct.toFixed(2)}%`, 110, y);
+          doc.text(formatCurrency(row.currentValue, snapshot.summary.currency), 150, y);
+          y += 8;
+      });
+
+      return doc.output('blob');
+  }
+
+  async requestApproval(payload: { targetType: 'equity_transaction' | 'capital_event'; targetId: string; amount?: number; title: string; description?: string; }): Promise<void> {
+      const { userId, user } = await this._getContext();
+      await this.createApprovalRequest({
+          id: payload.targetId,
+          type: ApprovalType.CAPITAL_ACTION,
+          title: payload.title,
+          description: payload.description || '',
+          requesterId: userId,
+          requesterName: (user?.user_metadata?.full_name as string) || user?.email || 'System',
+          date: new Date().toISOString(),
+          status: 'PENDING',
+          relatedEntityId: payload.targetId,
+          amount: payload.amount,
+          priority: 'HIGH',
+          targetType: payload.targetType,
+          targetId: payload.targetId
+      } as ApprovalRequest);
+  }
+
+  async createCapitalEvent(input: CapitalEventInput): Promise<void> {
+      const { tenantId, userId, user } = await this._getContext();
+      this._assertCeo(user);
+
+      const { data, error } = await supabase
+        .from('capital_events')
+        .insert({
+            event_type: input.eventType,
+            amount: input.amount,
+            valuation: input.valuation,
+            notes: input.notes,
+            created_by: userId,
+            tenant_id: tenantId
+        })
+        .select('id')
+        .single();
+
+      if (error) throw error;
+      const createdId = data?.id as string;
+
+      await this.requestApproval({
+          targetType: 'capital_event',
+          targetId: createdId,
+          amount: input.amount,
+          title: input.eventType === 'INCREASE' ? 'Capital Increase' : 'Capital Decrease',
+          description: input.notes || ''
+      });
+  }
+
+  async createEquityTransaction(input: EquityTransactionInput): Promise<void> {
+      const { tenantId, userId, user } = await this._getContext();
+      this._assertCeo(user);
+
+      const { data, error } = await supabase
+        .from('equity_transactions')
+        .insert({
+            transaction_type: input.transactionType,
+            from_partner_id: input.fromPartnerId || null,
+            to_partner_id: input.toPartnerId || null,
+            shares: input.shares,
+            price_per_share: input.pricePerShare,
+            valuation: input.valuation,
+            created_by: userId,
+            tenant_id: tenantId
+        })
+        .select('id')
+        .single();
+
+      if (error) throw error;
+      const createdId = data?.id as string;
+
+      await this.requestApproval({
+          targetType: 'equity_transaction',
+          targetId: createdId,
+          amount: input.shares * input.pricePerShare,
+          title: `Equity ${input.transactionType}`,
+          description: 'Equity change pending approval'
+      });
+  }
+
+  previewEquityImpact(base: CapTablePayload, draft: EquityTransactionInput): EquityPreviewResult {
+      const rowsMap = new Map<string, CapTableRow>(
+          base.rows.map((row) => [row.partnerId, { ...row }])
+      );
+
+      let totalShares = base.summary.totalShares;
+
+      if (draft.transactionType === 'ISSUE') {
+          totalShares += draft.shares;
+          if (draft.toPartnerId) {
+              const existing = rowsMap.get(draft.toPartnerId);
+              rowsMap.set(draft.toPartnerId, {
+                  ...(existing || {
+                      partnerId: draft.toPartnerId,
+                      profileId: draft.toPartnerId,
+                      partnerName: 'New Partner',
+                      status: 'ACTIVE' as const,
+                      joinedAt: null,
+                      exitedAt: null,
+                      shares: 0,
+                      ownershipPct: 0,
+                      currentValue: 0
+                  }),
+                  shares: (existing?.shares || 0) + draft.shares
+              });
+          }
+      } else if (draft.transactionType === 'TRANSFER') {
+          if (draft.fromPartnerId) {
+              const sender = rowsMap.get(draft.fromPartnerId);
+              if (sender) sender.shares = Math.max(0, sender.shares - draft.shares);
+          }
+          if (draft.toPartnerId) {
+              const receiver = rowsMap.get(draft.toPartnerId);
+              rowsMap.set(draft.toPartnerId, {
+                  ...(receiver || {
+                      partnerId: draft.toPartnerId,
+                      profileId: draft.toPartnerId,
+                      partnerName: 'New Partner',
+                      status: 'ACTIVE' as const,
+                      joinedAt: null,
+                      exitedAt: null,
+                      shares: 0,
+                      ownershipPct: 0,
+                      currentValue: 0
+                  }),
+                  shares: (receiver?.shares || 0) + draft.shares
+              });
+          }
+      } else if (draft.transactionType === 'BUYBACK') {
+          totalShares = Math.max(0, totalShares - draft.shares);
+          if (draft.fromPartnerId) {
+              const seller = rowsMap.get(draft.fromPartnerId);
+              if (seller) seller.shares = Math.max(0, seller.shares - draft.shares);
+          }
+      }
+
+      const valuation = draft.valuation;
+      const pricePerShare = totalShares > 0 ? valuation / totalShares : 0;
+      const rows = Array.from(rowsMap.values()).map((row) => ({
+          ...row,
+          ownershipPct: totalShares > 0 ? (row.shares / totalShares) * 100 : 0,
+          currentValue: row.shares * pricePerShare
+      }));
+
+      return {
+          rows,
+          summary: {
+              ...base.summary,
+              valuation,
+              totalShares,
+              pricePerShare
+          }
+      };
+  }
+
+  async addPartner(profileId: string, joinedAt?: string): Promise<void> {
+      const { tenantId, user } = await this._getContext();
+      this._assertCeo(user);
+      const payload = {
+          profile_id: profileId,
+          joined_at: joinedAt || new Date().toISOString().slice(0, 10),
+          status: 'ACTIVE',
+          tenant_id: tenantId
+      };
+
+      const { error } = await supabase
+        .from('partners')
+        .upsert(payload, { onConflict: 'profile_id,tenant_id' });
+      if (error) throw error;
+  }
+
+  async updatePartnerStatus(partnerId: string, status: 'ACTIVE' | 'INACTIVE', exitedAt?: string | null): Promise<void> {
+      const { tenantId, user } = await this._getContext();
+      this._assertCeo(user);
+      const updates: Record<string, unknown> = {
+          status,
+          exited_at: exitedAt || null
+      };
+      const { error } = await supabase
+        .from('partners')
+        .update(updates)
+        .eq('id', partnerId)
+        .eq('tenant_id', tenantId);
+      if (error) throw error;
+  }
+
+  async getBreakEvenAnalysis() {
+      const { netProfit } = await this.getNetProfit();
+      return { fixedCosts: 0, variableCosts: 0, revenue: netProfit, breakEvenRevenue: 0, netProfit };
   }
 
     async getDashboardData() {
@@ -1960,6 +2564,8 @@ class DataService {
 }
 
 export const dataService = new DataService();
+
+
 
 
 

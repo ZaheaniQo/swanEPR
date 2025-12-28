@@ -1,18 +1,47 @@
-
-import React, { useState, useEffect } from 'react';
+import {
+  AlertCircle,
+  Banknote,
+  Bell,
+  Briefcase,
+  Building,
+  CheckCircle,
+  CheckSquare,
+  ChevronLeft,
+  ChevronRight,
+  DollarSign,
+  Factory,
+  FileBadge,
+  FileCheck,
+  FileText,
+  Globe,
+  Info,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Moon,
+  Package,
+  Receipt,
+  Search,
+  Settings,
+  Shield,
+  ShieldCheck,
+  Sun,
+  Tag,
+  Truck,
+  User,
+  UserCheck,
+  Users,
+  Wallet,
+  X,
+} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+
 import { useApp, useTranslation } from '../AppContext';
+import { FEATURE_ROLES } from '../constants';
+import { dataService } from '../services/dataService';
 import { useTheme } from '../theme/ThemeContext';
 import { Role } from '../types';
-import { FEATURE_ROLES } from '../constants';
-import { 
-  LayoutDashboard, FileText, Package, DollarSign, Users, Menu, Globe, Shield, 
-  Factory, Briefcase, X, CheckCircle, AlertCircle, Info, Search, Bell, 
-  ChevronLeft, ChevronRight, Settings, CheckSquare, FileBadge, Receipt, 
-  FileCheck, Truck, UserCheck, Tag, Wallet, ShieldCheck, Moon, Sun, User,
-  Building, Banknote, LogOut
-} from 'lucide-react';
-import { dataService } from '../services/dataService';
 import AIChatbot from './AIChatbot';
 
 const Layout: React.FC = () => {
@@ -60,26 +89,37 @@ const Layout: React.FC = () => {
   const allRoles = Object.values(Role) as Role[];
 
   const menuItems = [
-    { id: 'dashboard', path: '/dashboard', icon: LayoutDashboard, label: 'menu.dashboard', roles: FEATURE_ROLES.dashboard },
-    { id: 'approvals', path: '/approvals', icon: CheckSquare, label: 'menu.approvals', roles: FEATURE_ROLES.approvals, badge: pendingApprovals },
-    { id: 'compliance', path: '/compliance', icon: ShieldCheck, label: 'menu.compliance', roles: FEATURE_ROLES.compliance },
-    { id: 'my-profile', path: '/my-profile', icon: User, label: 'Profile', roles: allRoles },
-    { id: 'products', path: '/products', icon: Tag, label: 'menu.products', roles: FEATURE_ROLES.products_view },
-    { id: 'quotations', path: '/quotations', icon: FileBadge, label: 'menu.quotations', roles: FEATURE_ROLES.quotations_view },
-    { id: 'contracts', path: '/contracts', icon: FileText, label: 'menu.contracts', roles: FEATURE_ROLES.contracts_view },
-    { id: 'receipts', path: '/receipts', icon: Receipt, label: 'menu.receipts', roles: FEATURE_ROLES.receipts_view },
-    { id: 'invoices', path: '/invoices', icon: FileCheck, label: 'menu.invoices', roles: FEATURE_ROLES.invoices_view },
-    { id: 'disbursements', path: '/disbursements', icon: Wallet, label: 'menu.disbursements', roles: FEATURE_ROLES.disbursements_view },
-    { id: 'production', path: '/production', icon: Factory, label: 'menu.production', roles: FEATURE_ROLES.production_view },
-    { id: 'inventory', path: '/inventory', icon: Package, label: 'menu.inventory', roles: FEATURE_ROLES.inventory_view },
-    { id: 'suppliers', path: '/suppliers', icon: Truck, label: 'menu.suppliers', roles: FEATURE_ROLES.suppliers_view },
-    { id: 'customers', path: '/customers', icon: UserCheck, label: 'menu.customers', roles: FEATURE_ROLES.customers_view },
-    { id: 'accounting', path: '/accounting', icon: DollarSign, label: 'menu.accounting', roles: FEATURE_ROLES.accounting_view },
-    { id: 'assets', path: '/assets', icon: Building, label: 'menu.assets', roles: FEATURE_ROLES.assets },
-    { id: 'hr', path: '/hr', icon: Users, label: 'menu.hr', roles: FEATURE_ROLES.hr },
-    { id: 'payroll', path: '/payroll', icon: Banknote, label: 'menu.payroll', roles: FEATURE_ROLES.payroll },
-    { id: 'partners', path: '/partners', icon: Briefcase, label: 'menu.partners', roles: FEATURE_ROLES.partners },
-    { id: 'settings', path: '/settings', icon: Settings, label: 'menu.settings', roles: FEATURE_ROLES.settings },
+    { id: 'dashboard', path: '/dashboard', icon: LayoutDashboard, label: 'nav.dashboard', roles: FEATURE_ROLES.dashboard },
+    { id: 'approvals', path: '/approvals', icon: CheckSquare, label: 'nav.approvals', roles: FEATURE_ROLES.approvals, badge: pendingApprovals },
+    { id: 'compliance', path: '/compliance', icon: ShieldCheck, label: 'nav.compliance', roles: FEATURE_ROLES.compliance },
+    { id: 'my-profile', path: '/my-profile', icon: User, label: 'nav.profile', roles: allRoles },
+    { id: 'products', path: '/products', icon: Tag, label: 'nav.products', roles: FEATURE_ROLES.products_view },
+    { id: 'quotations', path: '/quotations', icon: FileBadge, label: 'nav.quotations', roles: FEATURE_ROLES.quotations_view },
+    { id: 'contracts', path: '/contracts', icon: FileText, label: 'nav.contracts', roles: FEATURE_ROLES.contracts_view },
+    { id: 'receipts', path: '/receipts', icon: Receipt, label: 'nav.receipts', roles: FEATURE_ROLES.receipts_view },
+    { id: 'invoices', path: '/invoices', icon: FileCheck, label: 'nav.invoices', roles: FEATURE_ROLES.invoices_view },
+    { id: 'disbursements', path: '/disbursements', icon: Wallet, label: 'nav.expenses', roles: FEATURE_ROLES.disbursements_view },
+    { id: 'production', path: '/production', icon: Factory, label: 'nav.production', roles: FEATURE_ROLES.production_view },
+    { id: 'inventory', path: '/inventory', icon: Package, label: 'nav.inventory', roles: FEATURE_ROLES.inventory_view },
+    { id: 'suppliers', path: '/suppliers', icon: Truck, label: 'nav.suppliers', roles: FEATURE_ROLES.suppliers_view },
+    { id: 'customers', path: '/customers', icon: UserCheck, label: 'nav.customers', roles: FEATURE_ROLES.customers_view },
+    { id: 'accounting', path: '/accounting', icon: DollarSign, label: 'nav.accounting', roles: FEATURE_ROLES.accounting_view },
+    { id: 'assets', path: '/assets', icon: Building, label: 'nav.assets', roles: FEATURE_ROLES.assets },
+    { id: 'hr', path: '/hr', icon: Users, label: 'nav.hr', roles: FEATURE_ROLES.hr },
+    { id: 'payroll', path: '/payroll', icon: Banknote, label: 'nav.payroll', roles: FEATURE_ROLES.payroll },
+    { id: 'partners', path: '/partners', icon: Briefcase, label: 'nav.partners', roles: FEATURE_ROLES.partners },
+    { id: 'settings', path: '/settings', icon: Settings, label: 'nav.settings', roles: FEATURE_ROLES.settings },
+  ];
+
+  const menuSections = [
+    { id: 'home', label: 'nav.home', items: ['dashboard'] },
+    { id: 'governance', label: 'nav.governance', items: ['approvals', 'compliance'] },
+    { id: 'sales', label: 'nav.sales', items: ['quotations', 'contracts', 'invoices', 'receipts'] },
+    { id: 'operations', label: 'nav.operations', items: ['products', 'production', 'inventory'] },
+    { id: 'entities', label: 'nav.entities', items: ['suppliers', 'customers'] },
+    { id: 'finance', label: 'nav.finance', items: ['accounting', 'disbursements', 'assets'] },
+    { id: 'hr', label: 'nav.hr', items: ['hr', 'payroll'] },
+    { id: 'admin', label: 'nav.admin', items: ['partners', 'settings', 'my-profile'] },
   ];
 
   const filteredMenu = menuItems.filter(item => item.roles.includes(currentUserRole));
@@ -118,7 +158,14 @@ const Layout: React.FC = () => {
         ))}
       </div>
 
-      {isMobile && isSidebarOpen && <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 transition-opacity" onClick={() => setIsSidebarOpen(false)} />}
+      {isMobile && isSidebarOpen && (
+        <button
+          type="button"
+          aria-label="Close sidebar"
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 transition-opacity"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
 
       <aside className={`fixed lg:static inset-y-0 z-50 bg-slate-900 text-white shadow-2xl transition-all duration-300 ease-in-out border-r border-slate-800 flex flex-col ${lang === 'ar' ? 'right-0 border-l border-r-0' : 'left-0 border-r'} ${sidebarWidth} ${sidebarMobilePosition}`}>
         <div className="h-18 flex items-center justify-center border-b border-slate-800/50 bg-gradient-to-r from-slate-900 to-slate-800 shrink-0 py-4">
@@ -139,24 +186,39 @@ const Layout: React.FC = () => {
           )}
         </div>
 
-        <nav className="flex-1 py-6 px-3 space-y-1.5 overflow-y-auto custom-scrollbar overflow-x-hidden">
-          {filteredMenu.map((item) => (
-            <NavLink
-              key={item.id}
-              to={item.path}
-              onClick={() => isMobile && setIsSidebarOpen(false)}
-              className={({ isActive }) => `w-full flex items-center gap-4 px-3.5 py-3 rounded-xl transition-all duration-200 group relative ${isActive ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`}
-              title={(!isSidebarOpen && !isMobile) ? t(item.label) : ''}
-            >
-              <div className="relative">
-                  <item.icon size={22} className={`transition-colors shrink-0`} />
-                  {item.badge && item.badge > 0 && (
-                      <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center border border-slate-900">{item.badge}</span>
-                  )}
+        <nav className="flex-1 py-6 px-3 space-y-4 overflow-y-auto custom-scrollbar overflow-x-hidden">
+          {menuSections.map((section) => {
+            const sectionItems = section.items
+              .map((id) => filteredMenu.find((item) => item.id === id))
+              .filter(Boolean);
+            if (!sectionItems.length) return null;
+            return (
+              <div key={section.id} className="space-y-1.5">
+                {(isSidebarOpen || isMobile) && (
+                  <div className={`px-3 text-xs font-semibold uppercase tracking-widest text-slate-500 ${lang === 'ar' ? 'text-right' : 'text-left'}`}>
+                    {t(section.label)}
+                  </div>
+                )}
+                {sectionItems.map((item) => (
+                  <NavLink
+                    key={item.id}
+                    to={item.path}
+                    onClick={() => isMobile && setIsSidebarOpen(false)}
+                    className={({ isActive }) => `w-full flex items-center gap-4 px-3.5 py-3 rounded-xl transition-all duration-200 group relative ${isActive ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`}
+                    title={(!isSidebarOpen && !isMobile) ? t(item.label) : ''}
+                  >
+                    <div className="relative">
+                        <item.icon size={22} className={`transition-colors shrink-0`} />
+                        {item.badge && item.badge > 0 && (
+                            <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center border border-slate-900">{item.badge}</span>
+                        )}
+                    </div>
+                    <span className={`text-sm font-medium tracking-wide whitespace-nowrap transition-all duration-200 ${(!isSidebarOpen && !isMobile) ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>{t(item.label)}</span>
+                  </NavLink>
+                ))}
               </div>
-              <span className={`text-sm font-medium tracking-wide whitespace-nowrap transition-all duration-200 ${(!isSidebarOpen && !isMobile) ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>{t(item.label)}</span>
-            </NavLink>
-          ))}
+            );
+          })}
         </nav>
 
         <div className="p-4 border-t border-slate-800 bg-slate-900/50 backdrop-blur-sm shrink-0">
@@ -176,7 +238,7 @@ const Layout: React.FC = () => {
             className={`mt-3 w-full flex items-center gap-3 px-3 py-2 rounded-xl border border-slate-700/60 text-slate-200 hover:bg-slate-800 hover:border-slate-600 transition-colors ${(!isSidebarOpen && !isMobile) ? 'justify-center' : ''}`}
           >
             <LogOut size={18} />
-            {(isSidebarOpen || isMobile) && <span className="text-sm font-semibold">{lang === 'ar' ? 'تسجيل الخروج' : 'Sign out'}</span>}
+            {(isSidebarOpen || isMobile) && <span className="text-sm font-semibold">{t('nav.signOut')}</span>}
           </button>
         </div>
       </aside>

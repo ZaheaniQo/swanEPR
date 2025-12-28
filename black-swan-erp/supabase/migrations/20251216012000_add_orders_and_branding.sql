@@ -22,10 +22,10 @@ DROP POLICY IF EXISTS "orders_tenant_r" ON orders;
 DROP POLICY IF EXISTS "orders_tenant_w" ON orders;
 DROP POLICY IF EXISTS "orders_tenant_r" ON orders;
 CREATE POLICY "orders_tenant_r" ON orders
-  FOR SELECT USING (tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid()));
+  FOR SELECT USING (tenant_id = app.current_tenant_id());
 CREATE POLICY "orders_tenant_w" ON orders
-  FOR ALL USING (tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid()))
-  WITH CHECK (tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid()));
+  FOR ALL USING (tenant_id = app.current_tenant_id())
+  WITH CHECK (tenant_id = app.current_tenant_id());
 
 -- 2) Order Items
 CREATE TABLE IF NOT EXISTS order_items (
@@ -48,10 +48,10 @@ DROP POLICY IF EXISTS "order_items_tenant_r" ON order_items;
 DROP POLICY IF EXISTS "order_items_tenant_w" ON order_items;
 DROP POLICY IF EXISTS "order_items_tenant_r" ON order_items;
 CREATE POLICY "order_items_tenant_r" ON order_items
-  FOR SELECT USING (tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid()));
+  FOR SELECT USING (tenant_id = app.current_tenant_id());
 CREATE POLICY "order_items_tenant_w" ON order_items
-  FOR ALL USING (tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid()))
-  WITH CHECK (tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid()));
+  FOR ALL USING (tenant_id = app.current_tenant_id())
+  WITH CHECK (tenant_id = app.current_tenant_id());
 
 -- 3) Branding column on settings (jsonb)
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS branding jsonb;

@@ -9,6 +9,7 @@ export type DisbursementRow = {
   amount: number;
   date: string;
   category: string | null;
+  department?: string | null;
   payment_method: string | null;
   status: string | null;
   approved_by: string | null;

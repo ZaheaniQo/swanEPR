@@ -1,9 +1,9 @@
-
-import React, { createContext, useContext, useState, useEffect, PropsWithChildren } from 'react';
-import { supabase } from './services/supabaseClient';
-import { ProfileStatus, Role } from './types';
-import { TRANSLATIONS } from './constants';
+﻿
+import React, { createContext, PropsWithChildren, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import { TRANSLATIONS } from './constants';
+import { supabase, getTenantIdFromSession } from './services/supabaseClient';
+import { ProfileStatus, Role } from './types';
 
 export interface Toast {
   id: string;
@@ -48,16 +48,9 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
       if (timeoutId) clearTimeout(timeoutId);
     }
   };
-  const [role, setRoleState] = useState<Role>(() => {
-    if (typeof window === 'undefined') return Role.PARTNER;
-    const cached = window.localStorage.getItem('bs_last_role') as Role | null;
-    return cached || Role.PARTNER;
-  });
+  const [role, setRoleState] = useState<Role>(Role.PARTNER);
   const persistRole = (r: Role) => {
     setRoleState(r);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('bs_last_role', r);
-    }
   };
   const [profileStatus, setProfileStatus] = useState<ProfileStatus | 'UNKNOWN'>('ACTIVE');
   const [passwordChanged, setPasswordChanged] = useState<boolean>(false);
@@ -70,10 +63,8 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
         setSession(session);
         setCurrentUser(session?.user || null);
         if (session?.user) {
-          const metaRole = session.user.user_metadata?.role as Role | undefined;
-          if (metaRole) persistRole(metaRole);
           setPasswordChanged(!!session.user.user_metadata?.password_changed);
-          await fetchUserRole(session.user.id, session.user.email, metaRole);
+          await fetchUserRole(session.user.id, session.user.email);
         } else {
           setPasswordChanged(false);
           setIsLoading(false);
@@ -96,10 +87,8 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
         setSession(session);
         setCurrentUser(session?.user || null);
         if (session?.user) {
-          const metaRole = session.user.user_metadata?.role as Role | undefined;
-          if (metaRole) persistRole(metaRole);
           setPasswordChanged(!!session.user.user_metadata?.password_changed);
-          await fetchUserRole(session.user.id, session.user.email, metaRole);
+          await fetchUserRole(session.user.id, session.user.email);
         } else {
           setPasswordChanged(false);
           setIsLoading(false);
@@ -114,42 +103,57 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchUserRole = async (userId: string, email?: string, metaRole?: Role) => {
+  const rolePriority: Role[] = [
+    Role.SUPER_ADMIN,
+    Role.CEO,
+    Role.ACCOUNTING,
+    Role.HR,
+    Role.PRODUCTION_MANAGER,
+    Role.WAREHOUSE,
+    Role.MARKETING,
+    Role.PARTNER,
+    Role.EMPLOYEE
+  ];
+
+  const pickRole = (roles: string[]): Role | null => {
+    const roleSet = new Set(roles);
+    return rolePriority.find((r) => roleSet.has(r)) || null;
+  };
+
+  const fetchUserRole = async (userId: string, email?: string) => {
     try {
-      const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      const isDev = !!(import.meta as any).env?.DEV;
-      const devSuperAdminEmail = (import.meta as any).env?.VITE_DEV_SUPERADMIN_EMAIL as string | undefined;
-      if (isDev && isLocal && devSuperAdminEmail && email && email.toLowerCase() === devSuperAdminEmail.toLowerCase()) {
-        persistRole(Role.SUPER_ADMIN);
-        setProfileStatus('ACTIVE');
-        return;
-      }
-
+      const tenantId = await getTenantIdFromSession();
       const roleQuery = supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .maybeSingle();
+        .from('user_roles')
+        .select('role:roles(name)')
+        .eq('user_id', userId)
+        .eq('tenant_id', tenantId);
 
-      const { data, error } = await withTimeout(
-        roleQuery as unknown as Promise<{ data: { role?: Role } | null; error: any }>,
-        AUTH_TIMEOUT_MS,
-        'fetchUserRole'
-      );
+      const { data, error } = await withTimeout(roleQuery, AUTH_TIMEOUT_MS, 'fetchUserRole');
 
       if (error) throw error;
 
-      if (data && data.role) {
-        persistRole(data.role as Role);
+      const roles = (data || []).map((row: any) => row.role?.name).filter(Boolean) as string[];
+      const resolved = pickRole(roles);
+
+      if (resolved) {
+        persistRole(resolved);
       } else {
-        // Fallback to metadata role if available, otherwise keep current
-        if (metaRole) persistRole(metaRole);
+        const { data: profileData, error: profileError } = await withTimeout(
+          supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', userId)
+            .maybeSingle(),
+          AUTH_TIMEOUT_MS,
+          'fetchUserRoleFallback'
+        );
+        if (!profileError && profileData?.role) persistRole(profileData.role as Role);
       }
       setProfileStatus('ACTIVE');
     } catch (err) {
       console.error('Failed to fetch user role', err);
-      // Keep current role to avoid flicker; optionally fall back to metadata
-      if (metaRole) persistRole(metaRole);
+      // Keep current role to avoid flicker
       setProfileStatus('ACTIVE');
     } finally {
       setIsLoading(false);
@@ -168,9 +172,6 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
     persistRole(Role.PARTNER);
     setProfileStatus('ACTIVE');
     setPasswordChanged(false);
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem('bs_last_role');
-    }
   };
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -215,10 +216,27 @@ export const useTranslation = () => {
   const t = (key: string) => {
     const entry = TRANSLATIONS[key];
     if (!entry) return key;
-    return entry[lang];
+    const value = entry[lang];
+    if (lang === 'ar' && typeof value === 'string') {
+      const mojibakePattern =
+        /[\xC0-\xFF]/;
+      const fixed =
+        mojibakePattern.test(value) && typeof TextDecoder !== 'undefined'
+          ? new TextDecoder('utf-8', { fatal: false }).decode(
+              Uint8Array.from(value, (char) => char.charCodeAt(0))
+            )
+          : value;
+      if (fixed.includes('\uFFFD')) return entry.en;
+      return fixed;
+    }
+    return value;
   };
 
   const toggleLang = () => setLang(lang === 'en' ? 'ar' : 'en');
 
   return { t, lang, toggleLang, dir };
 };
+
+
+
+

@@ -1,16 +1,12 @@
--- Align profiles defaults with latest app logic: ACTIVE status by default and tenant scoping
+-- Align profiles defaults with latest app logic: PENDING status by default and admin-managed tenant assignment
 alter table public.profiles
-  add column if not exists status text default 'ACTIVE',
+  add column if not exists status text default 'PENDING',
   add column if not exists tenant_id uuid,
   add column if not exists approved_by uuid,
   add column if not exists approved_at timestamptz;
 
--- Default role to PARTNER (minimal app role)
-alter table public.profiles alter column role set default 'PARTNER';
--- Default status to ACTIVE for existing records
-update public.profiles set status = 'ACTIVE' where status is null or status = 'PENDING';
--- Backfill tenant_id with self id as single-tenant fallback
-update public.profiles set tenant_id = coalesce(tenant_id, id) where tenant_id is null;
+-- Roles are assigned by admins only
+alter table public.profiles alter column role drop default;
 
 -- Indexes used by app filters
 create index if not exists idx_profiles_status on public.profiles(status);

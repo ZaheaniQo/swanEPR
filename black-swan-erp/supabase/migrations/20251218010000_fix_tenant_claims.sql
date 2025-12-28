@@ -1,5 +1,10 @@
 -- Align tenant claim resolution and audit/profile hooks
 
+CREATE SCHEMA IF NOT EXISTS app;
+CREATE OR REPLACE FUNCTION app.unassigned_tenant_id() RETURNS uuid AS $$
+  SELECT '00000000-0000-0000-0000-000000000000'::uuid;
+$$ LANGUAGE sql IMMUTABLE;
+
 CREATE OR REPLACE FUNCTION get_current_tenant_id()
 RETURNS uuid
 LANGUAGE plpgsql
@@ -17,16 +22,6 @@ BEGIN
 
   IF v_claims IS NOT NULL THEN
     v_tenant := NULLIF(v_claims->>'tenant_id', '')::uuid;
-    IF v_tenant IS NULL THEN
-      v_tenant := NULLIF(v_claims->'app_metadata'->>'tenant_id', '')::uuid;
-    END IF;
-    IF v_tenant IS NULL THEN
-      v_tenant := NULLIF(v_claims->'user_metadata'->>'tenant_id', '')::uuid;
-    END IF;
-  END IF;
-
-  IF v_tenant IS NULL THEN
-    v_tenant := auth.uid();
   END IF;
 
   RETURN v_tenant;
@@ -36,21 +31,12 @@ $$;
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
-  v_tenant uuid;
   v_role text;
 BEGIN
-  v_tenant := NULLIF(NEW.raw_user_meta_data->>'tenant_id', '')::uuid;
-  IF v_tenant IS NULL THEN
-    v_tenant := NULLIF(NEW.raw_app_meta_data->>'tenant_id', '')::uuid;
-  END IF;
-  IF v_tenant IS NULL THEN
-    v_tenant := NEW.id;
-  END IF;
+  v_role := NULL;
 
-  v_role := COALESCE(NEW.raw_user_meta_data->>'role', 'PARTNER');
-
-  INSERT INTO public.profiles (id, email, full_name, role, status, tenant_id)
-  VALUES (NEW.id, NEW.email, NEW.raw_user_meta_data->>'full_name', v_role, 'PENDING', v_tenant);
+  INSERT INTO public.profiles (id, email, status, tenant_id)
+  VALUES (NEW.id, NEW.email, 'PENDING', app.unassigned_tenant_id());
 
   RETURN NEW;
 END;

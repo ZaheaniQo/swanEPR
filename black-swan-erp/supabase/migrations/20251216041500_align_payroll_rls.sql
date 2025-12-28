@@ -19,8 +19,8 @@ DROP POLICY IF EXISTS "Tenant Isolation Insert" ON payroll_runs;
 DROP POLICY IF EXISTS "Tenant Isolation Update" ON payroll_runs;
 DROP POLICY IF EXISTS "Tenant Isolation Delete" ON payroll_runs;
 
-CREATE POLICY "Payroll Select tenant or null" ON payroll_runs
-  FOR SELECT USING (tenant_id = get_current_tenant_id() OR tenant_id IS NULL);
+CREATE POLICY "Payroll Select tenant only" ON payroll_runs
+  FOR SELECT USING (tenant_id = get_current_tenant_id());
 CREATE POLICY "Payroll Insert tenant only" ON payroll_runs
   FOR INSERT WITH CHECK (tenant_id = get_current_tenant_id());
 CREATE POLICY "Payroll Update tenant" ON payroll_runs
@@ -33,8 +33,8 @@ DROP POLICY IF EXISTS "Tenant Isolation Insert" ON payslips;
 DROP POLICY IF EXISTS "Tenant Isolation Update" ON payslips;
 DROP POLICY IF EXISTS "Tenant Isolation Delete" ON payslips;
 
-CREATE POLICY "Payslips Select tenant or null" ON payslips
-  FOR SELECT USING (tenant_id = get_current_tenant_id() OR tenant_id IS NULL);
+CREATE POLICY "Payslips Select tenant only" ON payslips
+  FOR SELECT USING (tenant_id = get_current_tenant_id());
 CREATE POLICY "Payslips Insert tenant only" ON payslips
   FOR INSERT WITH CHECK (tenant_id = get_current_tenant_id());
 CREATE POLICY "Payslips Update tenant" ON payslips

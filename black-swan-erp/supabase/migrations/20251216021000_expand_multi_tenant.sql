@@ -9,14 +9,14 @@ DROP POLICY IF EXISTS "settings_tenant_r" ON settings;
 DROP POLICY IF EXISTS "settings_tenant_w" ON settings;
 CREATE POLICY "settings_tenant_r" ON settings
   FOR SELECT USING (
-    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = app.current_tenant_id()
   );
 CREATE POLICY "settings_tenant_w" ON settings
   FOR ALL USING (
-    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = app.current_tenant_id()
   )
   WITH CHECK (
-    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = app.current_tenant_id()
   );
 
 -- Invoices
@@ -28,14 +28,14 @@ DROP POLICY IF EXISTS "invoices_tenant_r" ON invoices;
 DROP POLICY IF EXISTS "invoices_tenant_w" ON invoices;
 CREATE POLICY "invoices_tenant_r" ON invoices
   FOR SELECT USING (
-    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = app.current_tenant_id()
   );
 CREATE POLICY "invoices_tenant_w" ON invoices
   FOR ALL USING (
-    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = app.current_tenant_id()
   )
   WITH CHECK (
-    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = app.current_tenant_id()
   );
 
 -- Invoice items

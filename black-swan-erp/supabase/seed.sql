@@ -6,6 +6,9 @@
 -- It is executed automatically by Supabase after migrations during `db reset`.
 -- ==============================================================================
 
+-- Seed runs without auth; inject an unassigned tenant claim for defaults
+select set_config('request.jwt.claims', '{"tenant_id":"00000000-0000-0000-0000-000000000000"}', true);
+
 -- 1. CHART OF ACCOUNTS
 -- ==============================================================================
 INSERT INTO coa_accounts (code, name, type, subtype) VALUES

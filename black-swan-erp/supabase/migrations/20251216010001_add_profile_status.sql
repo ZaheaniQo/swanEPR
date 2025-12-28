@@ -5,18 +5,15 @@ alter table public.profiles
   add column if not exists approved_by uuid,
   add column if not exists approved_at timestamptz;
 
--- Make role default to a non-pending value (use PARTNER as minimal role)
-alter table public.profiles alter column role set default 'PARTNER';
+-- Role defaults are assigned by admins only (no default role)
+alter table public.profiles alter column role drop default;
 
 -- Backfill existing rows
 update public.profiles
   set status = coalesce(status, 'ACTIVE')
   where status is null;
 
--- Optional: backfill tenant_id with id if missing (single-tenant fallback)
-update public.profiles
-  set tenant_id = id
-  where tenant_id is null;
+-- No tenant backfill here; tenant assignment is admin-only
 
 -- Indexes for lookups
 create index if not exists idx_profiles_tenant on public.profiles(tenant_id);

@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
-  const { currentUserRole, isLoading, profileStatus } = useApp();
+  const { currentUser, isLoading, currentUserRole } = useApp();
 
   if (isLoading) {
     return (
@@ -20,12 +20,19 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowe
     );
   }
 
-  if (currentUserRole === Role.SUPER_ADMIN) {
-    return <>{children}</>;
+  if (!currentUser) {
+    return <Navigate to="/login" replace />;
   }
 
   if (allowedRoles && !allowedRoles.includes(currentUserRole)) {
-    return <Navigate to="/dashboard" replace />;
+    return (
+      <div className="flex items-center justify-center h-screen bg-background text-text-muted">
+        <div className="text-center">
+          <div className="text-2xl font-semibold text-primary">Permission Denied</div>
+          <div className="mt-2 text-sm">You do not have access to this page.</div>
+        </div>
+      </div>
+    );
   }
 
   return <>{children}</>;

@@ -20,12 +20,12 @@ DROP POLICY IF EXISTS "receipts_tenant_r" ON receipts;
 DROP POLICY IF EXISTS "receipts_tenant_w" ON receipts;
 CREATE POLICY "receipts_tenant_r" ON receipts
   FOR SELECT USING (
-    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = app.current_tenant_id()
   );
 CREATE POLICY "receipts_tenant_w" ON receipts
   FOR ALL USING (
-    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = app.current_tenant_id()
   )
   WITH CHECK (
-    tenant_id = coalesce((auth.jwt() ->> 'tenant_id')::uuid, auth.uid())
+    tenant_id = app.current_tenant_id()
   );
