@@ -1,3 +1,10 @@
-// Temporary shim to preserve existing imports while the codebase migrates to src/lib/supabase.
-// All new code should import from 'src/lib/supabase'.
-export { supabase, getTenantIdFromSession } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL;
+const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase Environment Variables');
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);

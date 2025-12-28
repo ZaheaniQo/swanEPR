@@ -1,5 +1,5 @@
-﻿
-import { supabase, getTenantIdFromSession } from '../supabaseClient';
+
+import { supabase } from '../supabaseClient';
 import { Account, AccountType, JournalEntry, JournalStatus, TaxInvoice, WorkOrder, Disbursement } from '../../types';
 import { getList, create, getOne } from './core';
 
@@ -10,7 +10,7 @@ const TBL_JOURNAL_LINES = 'journal_lines';
 async function getContext() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthorized');
-  const tenantId = await getTenantIdFromSession();
+  const tenantId = user.app_metadata?.tenant_id || user.id;
   return { userId: user.id, tenantId };
 }
 
@@ -133,7 +133,7 @@ export const accountingService = {
   // --- JOURNAL ENTRIES ---
 
   async createJournalEntry(entry: Partial<JournalEntry>): Promise<string> {
-    const { userId } = await getContext();
+    const { userId, tenantId } = await getContext();
 
     const totalDebit = entry.lines?.reduce((sum, line) => sum + (line.debit || 0), 0) || 0;
     const totalCredit = entry.lines?.reduce((sum, line) => sum + (line.credit || 0), 0) || 0;
@@ -150,7 +150,8 @@ export const accountingService = {
       reference: header.reference,
       description: header.description,
       status: header.status || JournalStatus.POSTED,
-      created_by: userId
+      created_by: userId,
+      tenant_id: tenantId
     };
 
     const { data: je, error: jeError } = await supabase
@@ -167,7 +168,8 @@ export const accountingService = {
         account_id: l.accountId,
         description: l.description || header.description,
         debit: l.debit || 0,
-        credit: l.credit || 0
+        credit: l.credit || 0,
+        tenant_id: tenantId
       }));
 
       const { error: lineError } = await supabase.from(TBL_JOURNAL_LINES).insert(linesPayload);
@@ -256,14 +258,13 @@ export const accountingService = {
   async postWorkOrderCompletion(wo: WorkOrder, totalCost: number) {
       // 1. Get Accounts
       const accInventory = await this.getAccountByCode('1200'); // Inventory Asset
-      const accCogs = await this.getAccountByCode('5000'); // COGS / WIP proxy
       // In a real system, we might have separate accounts for Raw Materials vs Finished Goods
       // For now, we just debit and credit the same account to reflect transformation (or maybe different sub-accounts if we had them)
       // Let's assume 1200 is General Inventory. 
       // To make it meaningful, let's assume we have a "Cost of Goods Manufactured" or similar if we want to track flow.
       // But strictly, it's Asset -> Asset.
       
-      if (!accInventory || !accCogs) throw new Error('Missing accounts for work order posting (1200, 5000)');
+      if (!accInventory) throw new Error('Missing Inventory Account (1200)');
 
       // 2. Create Journal Entry
       // Debit Finished Goods (Increase)
@@ -300,7 +301,7 @@ export const accountingService = {
             description: `Finished Goods - ${wo.productName}`
           },
           {
-            accountId: accCogs.id,
+            accountId: accInventory.id,
             debit: 0,
             credit: totalCost,
             description: `Raw Materials Consumed`
@@ -368,4 +369,3 @@ export const accountingService = {
     };
   }
 };
-

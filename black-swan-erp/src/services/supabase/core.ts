@@ -1,10 +1,10 @@
-﻿
-import { supabase, getTenantIdFromSession } from '../supabaseClient';
+
+import { supabase } from '../supabaseClient';
 
 const getContext = async () => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthorized');
-  const tenantId = await getTenantIdFromSession();
+  const tenantId = user.app_metadata?.tenant_id || user.id;
   return { tenantId };
 };
 
@@ -78,21 +78,21 @@ export const getById = async <T>(table: string, id: string): Promise<T | null> =
 };
 
 export const create = async <T>(table: string, item: any): Promise<T> => {
-  await getContext();
-  const { tenant_id, ...sanitized } = item || {};
+  const { tenantId } = await getContext();
+  const itemWithTenant = item && item.tenant_id ? item : { ...item, tenant_id: tenantId };
 
-  const { data, error } = await supabase.from(table).insert(sanitized).select().single();
+  const { data, error } = await supabase.from(table).insert(itemWithTenant).select().single();
   if (error) throw error;
   return data as T;
 };
 
 export const update = async <T>(table: string, id: string, updates: any): Promise<T> => {
   const { tenantId } = await getContext();
-  const { tenant_id, ...sanitized } = updates || {};
+  const updatesWithTenant = updates && updates.tenant_id ? updates : { ...updates, tenant_id: tenantId };
 
   const { data, error } = await supabase
     .from(table)
-    .update(sanitized)
+    .update(updatesWithTenant)
     .eq('id', id)
     .eq('tenant_id', tenantId)
     .select()
@@ -122,4 +122,3 @@ export const getOne = async <T>(table: string, id: string): Promise<T | undefine
   if (error) return undefined;
   return data as T;
 };
-

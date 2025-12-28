@@ -85,8 +85,7 @@ export enum ApprovalType {
   LEAVE = 'Leave Request',
   INVOICE = 'Invoice Approval',
   JOURNAL = 'Journal Entry',
-  ACCESS = 'Access Request',
-  CAPITAL_ACTION = 'CAPITAL_ACTION'
+  ACCESS = 'Access Request'
 }
 
 export interface ApprovalRequest {
@@ -110,9 +109,6 @@ export interface ApprovalRequest {
   decisionNote?: string;
   payload?: Record<string, any>;
 }
-
-export type EquityTransactionType = 'ISSUE' | 'TRANSFER' | 'BUYBACK';
-export type CapitalEventType = 'INCREASE' | 'DECREASE';
 
 export interface AccessRequest {
   id: string;

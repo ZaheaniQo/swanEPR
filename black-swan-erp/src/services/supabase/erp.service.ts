@@ -1,4 +1,4 @@
-﻿
+
 import { 
   CostCenter, Warehouse, InventoryStock, LandedCost, 
   AssetCategory, Asset, AssetDepreciationSchedule, 
@@ -6,7 +6,7 @@ import {
   SalaryStructure, LeaveRecord, PayrollRun, Payslip, JournalStatus 
 } from '../../types';
 import * as dbCore from './core';
-import { supabase, getTenantIdFromSession } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { accountingService } from './accounting.service';
 
 const TBL = {
@@ -29,7 +29,7 @@ const TBL = {
 const getContext = async () => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthorized');
-  const tenantId = await getTenantIdFromSession();
+  const tenantId = (user as any).app_metadata?.tenant_id || user.id;
   return { tenantId, userId: user.id };
 };
 
@@ -95,33 +95,30 @@ export const erpService = {
   },
   async createBOM(bom: Partial<BillOfMaterials>, items: Partial<BOMItem>[]) {
     const { tenantId } = await getContext();
-    if (!bom.name || !bom.productId) throw new Error('BOM name and product are required');
-    if (!items || items.length === 0) throw new Error('At least one BOM item is required');
-
+    // 1. Create BOM Header (Map to snake_case)
     const dbBom = {
-      name: bom.name,
-      product_id: bom.productId,
-      version: bom.version,
+        name: bom.name,
+        product_id: bom.productId,
+        version: bom.version,
       is_active: bom.isActive,
       output_quantity: bom.outputQuantity,
-      notes: (bom as any).notes
+      tenant_id: tenantId
     };
-
-    const itemsPayload = (items || []).map((i) => ({
-      component_product_id: i.componentProductId,
-      quantity: i.quantity,
-      wastage_percent: i.wastagePercent
-    }));
-
-    const { data, error } = await supabase.rpc('create_bom_with_items', {
-      p_bom: dbBom,
-      p_items: itemsPayload,
-      p_tenant_id: tenantId
-    });
-
-    if (error) throw error;
-
-    return { id: data?.id, ...bom } as BillOfMaterials;
+    const newBom = await dbCore.create<BillOfMaterials>(TBL.BOM, dbBom as any);
+    
+    // 2. Create BOM Items
+    if (items.length > 0) {
+        const itemsWithId = items.map(i => ({ 
+            bom_id: newBom.id, 
+            component_product_id: i.componentProductId,
+            quantity: i.quantity,
+        wastage_percent: i.wastagePercent,
+        tenant_id: tenantId
+        }));
+        const { error } = await supabase.from(TBL.BOM_ITEMS).insert(itemsWithId);
+        if (error) throw error;
+    }
+    return newBom;
   },
   async getBOMItems(bomId: string) {
     return dbCore.getList<BOMItem>(TBL.BOM_ITEMS, q => q.eq('bom_id', bomId));
@@ -155,26 +152,31 @@ export const erpService = {
         .single();
       if (!stock) throw new Error('Stock record not found');
 
-      // 2. Calculate delta
+      // 2. Calculate New Quantity
       const delta = type === 'IN' ? quantity : -quantity;
+      const newQty = Number(stock.quantity) + delta;
+      
+      if (newQty < 0) throw new Error('Insufficient stock');
 
-      // 3. Resolve unit cost for valuation
+      // 3. Update Stock
+      await dbCore.update(TBL.INVENTORY_STOCK, stockId, { quantity: newQty });
+
+      // 4. Record Movement
       // We need product cost for valuation
       const { data: product } = await supabase.from('products').select('avg_cost').eq('id', stock.product_id).eq('tenant_id', tenantId).single();
       const unitCost = product?.avg_cost || 0;
+        
 
-      const { error } = await supabase.rpc('adjust_inventory_with_movement', {
-        p_product_id: stock.product_id,
-        p_warehouse_id: stock.warehouse_id,
-        p_type: type === 'IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
-        p_quantity: delta,
-        p_unit_cost: unitCost,
-        p_user_id: userId,
-        p_notes: reason || null,
-        p_tenant_id: tenantId
+      await supabase.from('inventory_movements').insert({
+          product_id: stock.product_id,
+          warehouse_id: stock.warehouse_id,
+          type: type === 'IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
+          quantity: quantity,
+          unit_cost: unitCost,
+          notes: reason,
+          user_id: userId,
+          tenant_id: tenantId
       });
-
-      if (error) throw error;
   },
 
   async adjustStockByProduct(productId: string, warehouseId: string, quantity: number, type: 'IN' | 'OUT', reason?: string) {
@@ -210,37 +212,87 @@ export const erpService = {
 
   async updateWorkOrderStatus(id: string, status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED') {
       const { tenantId } = await getContext();
-      if (status === 'COMPLETED') {
-        return this.completeWorkOrder(id);
-      }
-
+      // 1. Update Status
       const { data: wo, error } = await supabase
         .from(TBL.WORK_ORDERS)
         .update({ status })
         .eq('id', id)
         .eq('tenant_id', tenantId)
-        .select('id, bom_id, product_id, warehouse_id, quantity_produced, status, number, tenant_id')
+        .select('id, bom_id, product_id, warehouse_id, quantity_produced, status, number, tenant_id, product:products(avg_cost, name)') // Fetch cost for accounting
         .single();
-
+      
       if (error) throw error;
+
+      // 2. If Completed, Handle Inventory & Accounting
+      if (status === 'COMPLETED' && wo) {
+          // A. Consume Raw Materials
+          if (wo.bom_id) {
+              const bomItems = await this.getBOMItems(wo.bom_id);
+              for (const item of bomItems) {
+                  // Find stock for this component in the WO warehouse
+                  // Note: In a real app, we might need to pick from multiple batches or locations
+                  // Here we assume one stock record per product per warehouse for simplicity
+                  const { data: stock } = await supabase
+                      .from(TBL.INVENTORY_STOCK)
+                      .select('id')
+                      .eq('product_id', item.componentProductId)
+                      .eq('warehouse_id', wo.warehouse_id)
+                        .eq('tenant_id', tenantId)
+                      .single();
+                  
+                  if (stock) {
+                      const qtyConsumed = item.quantity * wo.quantity_produced;
+                      await this.adjustStock(stock.id, qtyConsumed, 'OUT', `WO Consumption - ${wo.number}`);
+                  } else {
+                      console.warn(`Stock not found for component ${item.componentProductId} in warehouse ${wo.warehouse_id}`);
+                      // In strict mode, we should throw error here
+                  }
+              }
+          }
+
+          // B. Add Finished Goods
+          // Find or Create Stock Record for Finished Good
+          const { data: fgStock } = await supabase
+              .from(TBL.INVENTORY_STOCK)
+              .select('id')
+              .eq('product_id', wo.product_id)
+              .eq('warehouse_id', wo.warehouse_id)
+                .eq('tenant_id', tenantId)
+              .single();
+          
+          if (fgStock) {
+              await this.adjustStock(fgStock.id, wo.quantity_produced, 'IN', `WO Production - ${wo.number}`);
+          } else {
+              // Create new stock record if it doesn't exist
+              const { data: newStock } = await supabase.from(TBL.INVENTORY_STOCK).insert({
+                  product_id: wo.product_id,
+                  warehouse_id: wo.warehouse_id,
+                quantity: 0, // Will be adjusted below
+                reorder_level: 0,
+                tenant_id: tenantId
+              }).select('id').single();
+              
+              if (newStock) {
+                  await this.adjustStock(newStock.id, wo.quantity_produced, 'IN', `WO Production - ${wo.number}`);
+              }
+          }
+
+          // C. Post to Accounting
+            const productInfo = Array.isArray((wo as any).product)
+              ? (wo as any).product[0]
+              : (wo as any).product;
+
+            const cost = productInfo?.avg_cost || 0;
+            const totalValue = cost * wo.quantity_produced; 
+          
+            if (totalValue > 0) {
+             await accountingService.postWorkOrderCompletion({
+               ...wo,
+               productName: productInfo?.name
+             }, totalValue);
+            }
+      }
       return wo;
-  },
-
-  async completeWorkOrder(id: string, notes?: string) {
-      const idempotencyKey =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-      const { data, error } = await supabase.rpc('complete_work_order', {
-        p_work_order_id: id,
-        p_completed_at: new Date().toISOString(),
-        p_notes: notes || null,
-        p_idempotency_key: idempotencyKey
-      });
-
-      if (error) throw error;
-      return data;
   },
 
   // --- HR & PAYROLL ---
@@ -277,33 +329,34 @@ export const erpService = {
   },
   async createPayrollRun(month: number, year: number) {
     const { tenantId, userId } = await getContext();
-    if (month < 1 || month > 12) throw new Error('Invalid payroll month');
-    if (year < 2000) throw new Error('Invalid payroll year');
 
     const { payslips, totalAmount } = await this.previewPayrollRun(month, year);
 
-    const { data, error } = await supabase.rpc('create_payroll_run_with_payslips', {
-      p_run: {
-        month,
-        year,
-        status: 'PROCESSED',
-        total_amount: totalAmount,
-        processed_at: new Date().toISOString(),
-        created_by: userId
-      },
-      p_payslips: payslips,
-      p_tenant_id: tenantId
-    });
-
-    if (error) throw error;
-
-    return {
-      id: data?.id,
+    const { data: run, error: runErr } = await supabase.from(TBL.PAYROLL_RUNS).insert({
       month,
       year,
       status: 'PROCESSED',
+      total_amount: totalAmount,
+      processed_at: new Date().toISOString(),
+      tenant_id: tenantId,
+      created_by: userId
+    }).select('id, month, year, status, total_amount, processed_at').single();
+    if (runErr) throw runErr;
+
+    if (payslips.length) {
+      const { error: psErr } = await supabase.from(TBL.PAYSLIPS).insert(
+        payslips.map(p => ({ ...p, payroll_run_id: run.id }))
+      );
+      if (psErr) throw psErr;
+    }
+
+    return {
+      id: run.id,
+      month: run.month,
+      year: run.year,
+      status: run.status,
       totalAmount,
-      processedAt: new Date().toISOString()
+      processedAt: run.processed_at
     } as PayrollRun;
   },
 
@@ -399,4 +452,3 @@ export const erpService = {
     }
   }
 };
-

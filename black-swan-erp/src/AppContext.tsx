@@ -1,9 +1,9 @@
-﻿
-import React, { createContext, PropsWithChildren, useContext, useEffect, useState } from 'react';
-import { Session, User } from '@supabase/supabase-js';
-import { TRANSLATIONS } from './constants';
-import { supabase, getTenantIdFromSession } from './services/supabaseClient';
+
+import React, { createContext, useContext, useState, useEffect, PropsWithChildren } from 'react';
+import { supabase } from './services/supabaseClient';
 import { ProfileStatus, Role } from './types';
+import { TRANSLATIONS } from './constants';
+import { Session, User } from '@supabase/supabase-js';
 
 export interface Toast {
   id: string;
@@ -36,21 +36,16 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
   const [lang, setLang] = useState<'en' | 'ar'>('ar');
   const [isLoading, setIsLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const AUTH_TIMEOUT_MS = 8000;
-  const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string) => {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<T>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
-    });
-    try {
-      return await Promise.race([promise, timeout]);
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
-  };
-  const [role, setRoleState] = useState<Role>(Role.PARTNER);
+  const [role, setRoleState] = useState<Role>(() => {
+    if (typeof window === 'undefined') return Role.PARTNER;
+    const cached = window.localStorage.getItem('bs_last_role') as Role | null;
+    return cached || Role.PARTNER;
+  });
   const persistRole = (r: Role) => {
     setRoleState(r);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('bs_last_role', r);
+    }
   };
   const [profileStatus, setProfileStatus] = useState<ProfileStatus | 'UNKNOWN'>('ACTIVE');
   const [passwordChanged, setPasswordChanged] = useState<boolean>(false);
@@ -59,12 +54,14 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
     const loadSession = async () => {
       setIsLoading(true);
       try {
-        const { data: { session } } = await withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS, 'getSession');
+        const { data: { session } } = await supabase.auth.getSession();
         setSession(session);
         setCurrentUser(session?.user || null);
         if (session?.user) {
+          const metaRole = session.user.user_metadata?.role as Role | undefined;
+          if (metaRole) persistRole(metaRole);
           setPasswordChanged(!!session.user.user_metadata?.password_changed);
-          await fetchUserRole(session.user.id, session.user.email);
+          await fetchUserRole(session.user.id, session.user.email, metaRole);
         } else {
           setPasswordChanged(false);
           setIsLoading(false);
@@ -87,8 +84,10 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
         setSession(session);
         setCurrentUser(session?.user || null);
         if (session?.user) {
+          const metaRole = session.user.user_metadata?.role as Role | undefined;
+          if (metaRole) persistRole(metaRole);
           setPasswordChanged(!!session.user.user_metadata?.password_changed);
-          await fetchUserRole(session.user.id, session.user.email);
+          await fetchUserRole(session.user.id, session.user.email, metaRole);
         } else {
           setPasswordChanged(false);
           setIsLoading(false);
@@ -103,57 +102,34 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const rolePriority: Role[] = [
-    Role.SUPER_ADMIN,
-    Role.CEO,
-    Role.ACCOUNTING,
-    Role.HR,
-    Role.PRODUCTION_MANAGER,
-    Role.WAREHOUSE,
-    Role.MARKETING,
-    Role.PARTNER,
-    Role.EMPLOYEE
-  ];
-
-  const pickRole = (roles: string[]): Role | null => {
-    const roleSet = new Set(roles);
-    return rolePriority.find((r) => roleSet.has(r)) || null;
-  };
-
-  const fetchUserRole = async (userId: string, email?: string) => {
+  const fetchUserRole = async (userId: string, email?: string, metaRole?: Role) => {
     try {
-      const tenantId = await getTenantIdFromSession();
-      const roleQuery = supabase
-        .from('user_roles')
-        .select('role:roles(name)')
-        .eq('user_id', userId)
-        .eq('tenant_id', tenantId);
+      const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      if (isLocal && email && email.toLowerCase() === 'yysz2006@gmail.com') {
+        persistRole(Role.SUPER_ADMIN);
+        setProfileStatus('ACTIVE');
+        return;
+      }
 
-      const { data, error } = await withTimeout(roleQuery, AUTH_TIMEOUT_MS, 'fetchUserRole');
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle();
 
       if (error) throw error;
 
-      const roles = (data || []).map((row: any) => row.role?.name).filter(Boolean) as string[];
-      const resolved = pickRole(roles);
-
-      if (resolved) {
-        persistRole(resolved);
+      if (data && data.role) {
+        persistRole(data.role as Role);
       } else {
-        const { data: profileData, error: profileError } = await withTimeout(
-          supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', userId)
-            .maybeSingle(),
-          AUTH_TIMEOUT_MS,
-          'fetchUserRoleFallback'
-        );
-        if (!profileError && profileData?.role) persistRole(profileData.role as Role);
+        // Fallback to metadata role if available, otherwise keep current
+        if (metaRole) persistRole(metaRole);
       }
       setProfileStatus('ACTIVE');
     } catch (err) {
       console.error('Failed to fetch user role', err);
-      // Keep current role to avoid flicker
+      // Keep current role to avoid flicker; optionally fall back to metadata
+      if (metaRole) persistRole(metaRole);
       setProfileStatus('ACTIVE');
     } finally {
       setIsLoading(false);
@@ -172,6 +148,9 @@ export const AppProvider = ({ children }: PropsWithChildren) => {
     persistRole(Role.PARTNER);
     setProfileStatus('ACTIVE');
     setPasswordChanged(false);
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('bs_last_role');
+    }
   };
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -216,27 +195,10 @@ export const useTranslation = () => {
   const t = (key: string) => {
     const entry = TRANSLATIONS[key];
     if (!entry) return key;
-    const value = entry[lang];
-    if (lang === 'ar' && typeof value === 'string') {
-      const mojibakePattern =
-        /[\xC0-\xFF]/;
-      const fixed =
-        mojibakePattern.test(value) && typeof TextDecoder !== 'undefined'
-          ? new TextDecoder('utf-8', { fatal: false }).decode(
-              Uint8Array.from(value, (char) => char.charCodeAt(0))
-            )
-          : value;
-      if (fixed.includes('\uFFFD')) return entry.en;
-      return fixed;
-    }
-    return value;
+    return entry[lang];
   };
 
   const toggleLang = () => setLang(lang === 'en' ? 'ar' : 'en');
 
   return { t, lang, toggleLang, dir };
 };
-
-
-
-

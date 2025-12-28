@@ -4,72 +4,72 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useApp } from './AppContext';
 import { ThemeProvider } from './theme/ThemeContext';
 import Layout from './components/Layout';
-import Login from './pages/Login';
+import Login from './components/Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Role } from './types';
 import { FEATURE_ROLES } from './constants';
 
 // Dashboards
-import Dashboard from './pages/Dashboard';
-import ComplianceDashboard from './pages/ComplianceDashboard';
-import Approvals from './pages/Approvals';
+import Dashboard from './components/Dashboard';
+import ComplianceDashboard from './components/ComplianceDashboard';
+import Approvals from './components/Approvals';
 
 // Contracts
-import Contracts from './pages/Contracts';
-import ContractBuilder from './pages/contracts/ContractBuilder';
+import Contracts from './components/Contracts';
+import ContractBuilder from './components/contracts/ContractBuilder';
 
 // Inventory
-import Inventory from './pages/Inventory';
-import InventoryTransaction from './pages/inventory/InventoryTransaction';
+import Inventory from './components/Inventory';
+import InventoryTransaction from './components/inventory/InventoryTransaction';
 
 // Production
-import Production from './pages/Production';
-import BOMForm from './pages/production/BOMForm';
-import WorkOrderForm from './pages/production/WorkOrderForm';
+import Production from './components/Production';
+import BOMForm from './components/production/BOMForm';
+import WorkOrderForm from './components/production/WorkOrderForm';
 
 // Accounting
-import Accounting from './pages/Accounting';
-import JournalEntryForm from './pages/accounting/JournalEntryForm';
-import { TrialBalance } from './pages/accounting/TrialBalance';
-import Assets from './pages/Assets';
-import AssetForm from './pages/assets/AssetForm';
+import Accounting from './components/Accounting';
+import JournalEntryForm from './components/accounting/JournalEntryForm';
+import { TrialBalance } from './components/accounting/TrialBalance';
+import Assets from './components/Assets';
+import AssetForm from './components/assets/AssetForm';
 
 // HR
-import HR from './pages/HR';
-import EmployeeForm from './pages/hr/EmployeeForm';
-import Payroll from './pages/Payroll';
+import HR from './components/HR';
+import EmployeeForm from './components/hr/EmployeeForm';
+import Payroll from './components/Payroll';
 
 // Partners
-import Partners from './pages/Partners';
+import Partners from './components/Partners';
 
 // Settings
-import Settings from './pages/Settings';
+import Settings from './components/Settings';
 
 // Sales & Procurement
-import Quotations from './pages/Quotations';
-import QuotationForm from './pages/quotations/QuotationForm';
-import QuotationDetails from './pages/quotations/QuotationDetails';
+import Quotations from './components/Quotations';
+import QuotationForm from './components/quotations/QuotationForm';
+import QuotationDetails from './components/quotations/QuotationDetails';
 
-import Receipts from './pages/Receipts';
-import ReceiptForm from './pages/receipts/ReceiptForm';
+import Receipts from './components/Receipts';
+import ReceiptForm from './components/receipts/ReceiptForm';
 
-import Invoices from './pages/Invoices';
-import InvoiceDetails from './pages/InvoiceDetails';
-import InvoiceForm from './pages/invoices/InvoiceForm';
+import Invoices from './components/Invoices';
+import InvoiceDetails from './components/InvoiceDetails';
+import InvoiceForm from './components/invoices/InvoiceForm';
 
-import Disbursements from './pages/Disbursements';
-import DisbursementForm from './pages/disbursements/DisbursementForm';
+import Disbursements from './components/Disbursements';
+import DisbursementForm from './components/disbursements/DisbursementForm';
 
-import Suppliers from './pages/Suppliers';
-import SupplierForm from './pages/suppliers/SupplierForm';
+import Suppliers from './components/Suppliers';
+import SupplierForm from './components/suppliers/SupplierForm';
 
-import Customers from './pages/Customers';
-import CustomerForm from './pages/customers/CustomerForm';
+import Customers from './components/Customers';
+import CustomerForm from './components/customers/CustomerForm';
 
-import Products from './pages/Products';
-import ProductForm from './pages/products/ProductForm';
-import EmployeeProfile from './pages/EmployeeProfile';
-import ChangePassword from './pages/ChangePassword';
+import Products from './components/Products';
+import ProductForm from './components/products/ProductForm';
+import EmployeeProfile from './components/EmployeeProfile';
+import ChangePassword from './components/ChangePassword';
 
 const getDefaultPath = (role: Role) => {
   switch (role) {
@@ -213,11 +213,7 @@ const AppContent: React.FC = () => {
               <InvoiceForm />
             </ProtectedRoute>
           } />
-          <Route path="invoices/:id" element={
-            <ProtectedRoute allowedRoles={FEATURE_ROLES.invoices_view}>
-              <InvoiceDetails />
-            </ProtectedRoute>
-          } />
+          <Route path="invoices/:id" element={<InvoiceDetails />} />
 
           <Route path="disbursements" element={
             <ProtectedRoute allowedRoles={FEATURE_ROLES.disbursements_view}>
@@ -275,6 +271,11 @@ const AppContent: React.FC = () => {
           } />
 
           {/* Operations */}
+          <Route path="inventory" element={
+            <ProtectedRoute allowedRoles={FEATURE_ROLES.inventory_view}>
+              <Inventory />
+            </ProtectedRoute>
+          } />
           <Route path="settings" element={
             <ProtectedRoute allowedRoles={FEATURE_ROLES.settings}>
               <Settings />
